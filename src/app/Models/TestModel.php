@@ -10,7 +10,7 @@ class TestModel extends Model
     protected $connection = 'mongodb';
 
     // Set the collection name
-    protected $collection = 'test';
+    protected $table = 'test';
 
     // Define which fields can be mass-assigned (optional but good practice)
     protected $fillable = ['key', 'value'];
