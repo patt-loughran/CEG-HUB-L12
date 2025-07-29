@@ -1,0 +1,1214 @@
+General:
+    Core Technologies:
+        Backend: Laravel
+        Database: MongoDB
+        Frontend Styling: Tailwind CSS
+        Frontend Interactivity: Alpine.JS
+
+    Page Structure and File Organization:
+        - Each webpage has a primary controller and a main Blade view file. These files are organized hierarchically by feature. For instance, a "Payroll" page within the "Finance" section will have its files located as follows:
+
+            Controller: App/Http/Controllers/Finance/PayrollController.php
+            Main View: resources/views/finance/payroll.blade.php
+            Components: resources/views/components/finance/payroll/
+
+    Data and Component Interaction:
+        - The construction and data flow of a webpage follows a precise pattern:
+
+            Initial Load:
+                - A GET route in routes/web.php points to the index() method of the page's controller.
+                - This index() method gathers all necessary initial data and passes it to the main Blade view.
+
+            Main View:
+                - The main view's role is to structure the layout of the webpage and is comprised of blade components.
+                - It arranges these various Blade components, defining their visual presentation and dimensions. This includes making the components visual layout responsive.
+                - Blade components handle all user interactions and state changes using Alpine.JS. We do NOT use LiveWire. The components all fall into the following classes:
+
+                    User Input Components: These components contain HTML elements for user input, like <input> or <select>. When a user alters a value that needs to affect other components, this component dispatches a custom event.
+
+                    Data-Bridge Component: A "headless" (non-visual) Blade component listens for these custom events. Its responsibilities are to:
+
+                        Receive the event from the User Input Component.
+                        Send a POST request (using fetch) to the controller's getData() method.
+                        Receive the new data or any errors from the controller.
+                        Dispatch the received data or errors to "Display Components."
+
+
+                    Display Components: These components listen for events from the data-bridge. Upon receiving new data, they update their own state and appearance.
+
+                - The reason we use a headless Data-Bridge is because very often, the data that the display components need is related and we want to minimize sending multiple requests to get any overlapping data. 
+                - Should there be a scenario in which two or more display components need completely isolated data upon some event dispatch, there will be corresponding function endpoints in the controller. These will have more specific names. So instead of just one getData(), it will be two or more functions that say something like getSpecific1Data() and getSpecific2Data() etc.
+
+Controller Specific Rules:
+    The functions within a controller must be organized in the following order:
+        1) index(): This is always the first function. It is called by a GET request to handle the initial page load. It retrieves all necessary data for the initial view and returns the view with that data.
+        2) Index Helper Functions: Any functions called by index() should be placed directly below it, in the order they are called.
+        3) getData(): This function is placed below all index() related functions. It is called by fetch requests from the frontend to retrieve new data based on user interactions.
+        Note for getData: As stated in the general section, usually, there will be just one getData function as most of the time, the data that the display components need is overlapping. Should two or more display components need completely isolated data, there will be mutlipl getData functions that each have a slightly different name that specifies the data they are getting.
+
+    Database Queries:
+        - Use Raw MongoDB Aggregation Pipelines: For database queries within a getData function, raw MongoDB aggregation pipelines are required unless the query is a simple match. This is for performance reasons.
+        - Date/Time Objects: When using raw aggregation pipelines, PHP DateTime or Carbon objects are not compatible. They must be converted to MongoDB UTCDateTime objects using the following format:
+            new \MongoDB\BSON\UTCDateTime($date->getTimestamp() * 1000)
+        - Pipelines should be written to be as efficient as possible in terms of documents searched in order to reduce the time it takes for them to complete. For more information on this, please reference the MongoDB section of this guide.
+
+    Data Processing (Server vs. Client):
+
+        - A key principle is to balance server-side processing with minimizing data transfer size. The following rules apply:
+            - Perform Computations on the Server: Any data that requires calculation (sums, averages, etc.) must be computed within the controller. This is true even if it means the underlying data is also sent in the response.
+            - Avoid Redundant Data Transfer: Do not create separate variables for data that can be easily derived on the client-side without further computation.
+
+        Example Scenario:
+            A payroll page returns a table of employee hours. It also has display components for:
+                - Total hours for all employees.
+                - Total overtime hours for all employees.
+                - Average billable percentage for all employee hours.
+                - A list of employees with fewer than 80 hours.
+
+            In this case, the controller's response would look like this:
+
+                $response = [
+                'tableData'     => $results,                          // from Mongo then processed
+                'totalHours'    => $totalCompanyHours,                // computed from processed $tableData or from raw data in the process of computing $tableData
+                'totalOvertime' => $totalCompanyOvertime,             // computed from processed $tableData or from raw data in the process of computing $tableData
+                ′averageBillablePercentage′ => $avgBillablePercentage // computed from processed $tableData or from raw data in the process of computing $tableData
+                // Notice there is no return variable here for the quick view list, as this can be directly derived from $tableData without any further computation.    
+                ];
+
+            The totalHours, totalOvertime, and averageBillablePercentage values are calculated in the controller because they require computation.
+            The list of employees with fewer than 80 hours is not returned as a separate variable. This list will be derived on the client side by filtering the tableData array, as no new computation is needed.
+
+Alpine Rules:
+
+    1) Always use the full x-bind:attribute="<some JavaScript Expression here>" instead of :attribute="<some JavaScript Expression here>"
+        - this is because In Laravel, we use the ":" character to pass PHP expressions to Blade Components as props, and having them both in there can feel confusing
+
+    2) Do not define the Alpine object within the x-data, but instead, define it in a separate script tag at the bottom of the component file. The name of the function called should be the CamelCase path to the component file followed by the word "Logic". See the example below:
+        
+        <div x-data='pathToComponentLogic(@json($phpVarFromProps))'>
+            ...
+        </div>
+
+        @push('scripts')
+        <script>
+                function financeControlPanelLogic(dateRanges) {
+                return {
+                <Alpine Object vars and functions here>
+            }
+            }
+        </script>
+        @endpush
+
+    3) When defining the Alpine Object, the different sections should be in the following order:
+        @push('scripts')
+        <script>
+                function financeControlPanelLogic(dateRanges) {
+                return {
+                1)Class/Instance Variables set to null
+                2)init() {
+                    2a)initialize class/instance variables
+                    2b)define watchers
+                    }
+                3)otherFunctions()
+                4)dispatchChangeEvent()
+                
+            }
+            }
+        </script>
+        @endpush
+
+        Here is a full example:
+        TODO: Insert full example
+
+    4) As seen in the Previous example, always set any class/instance variables for the alpine object to null and then initialize them in the first part of the init() function
+
+    5) When you are conditionally setting the TailWind classes of an html element using x-bind:class="", if possible use the ternary, operator. If not, use Object Syntax:
+        - Example if ternary possible:
+            x-bind:class="activeFilters.includes(filter) ? 'bg-slate-700 text-white font-semibold' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'"
+
+        -Example if not possible:
+            x-bind:class="{
+                'bg-green-500 text-white': status === 'success',
+                'bg-yellow-500 text-black': status === 'warning', 
+                'bg-red-500 text-white': status === 'error',
+                'bg-gray-500 text-white': status === 'pending'
+                }"
+
+    6) When using <template> elements inside x-for blocks, if what is being populated needs to dynamically change, try to use just one template chunk with a function instead of multiple
+
+        - Bad Example:
+            <select class="col-span-3 w-full bg-slate-50 border">
+                <template x-if="rangeMode === 'month'">
+                    <template x-for="month in monthsForSelectedYear" :key="month">
+                        <option x-bind:value="month" x-text="month"></option>
+                    </template>
+                </template>
+                <template x-if="rangeMode === 'payPeriod'">
+                    <template x-for="pp in payPeriodsForSelectedYear" :key="pp">
+                        <option x-bind:value="pp" x-text="pp"></option>
+                    </template>
+                </template>
+            </select>
+            ...
+            <script>
+                function financeControlPanelLogic(dateRanges) {
+                return {
+                    selectedYear: null,
+                    rangeMode: null,
+
+                    init() {
+                        this.selectedYear = new Date().getFullYear().toString();
+                        this.rangeMode = "payPeriod";
+                    },
+                    getPayPeriodsForSelectedYear() {
+                        return dateRanges[this.selectedYear]?.payPeriods || [];
+                    },
+
+                    getMonthsForSelectedYear() {
+                        return dateRanges[this.selectedYear]?.months || [];
+                    }
+                }
+                }
+            <script>
+        
+        - Good Example:
+            <select class="col-span-3 w-full bg-slate-50 border">
+                <template x-for="option in getDateRangeOptions()" :key="option">
+                    <option x-bind:value="option" x-text="option"></option>
+                </template>
+            </select>
+            ...
+            <script>
+                function financeControlPanelLogic(dateRanges) {
+                return {
+                    selectedYear: null,
+                    rangeMode: null,
+
+                    init() {
+                        this.selectedYear = new Date().getFullYear().toString();
+                        this.rangeMode = "payPeriod";
+                    },
+
+                    getDateRangeOptions() {
+                        if (this.rangeMode === 'month')
+                            return dateRanges[this.selectedYear]?.months || [];
+
+                        else if (this.rangeMode === 'payPeriod')
+                            return dateRanges[this.selectedYear]?.payPeriods || [];
+                    },
+                }
+                }
+            <script>
+
+    7) When calling a function defined in the Alpine Object, always call it with the "()" at the end of the function name to signify it is a function. This also means that we do NOT use the "get" keyword to name a getter function.
+        - Bad Example:
+            <select class="col-span-3 w-full bg-slate-50 border">
+                <template x-for="option in dateRangeOptions" :key="option"> 
+                    <option x-bind:value="option" x-text="option"></option>
+                </template>
+            </select>
+            ...
+            <script>
+                function financeControlPanelLogic(dateRanges) {
+                return {
+                    selectedYear: null,
+                    rangeMode: null,
+
+                    init() {
+                        this.selectedYear = new Date().getFullYear().toString();
+                        this.rangeMode = "payPeriod";
+                    },
+
+                    get dateRangeOptions() {
+                        if (this.rangeMode === 'month')
+                            return dateRanges[this.selectedYear]?.months || [];
+
+                        else if (this.rangeMode === 'payPeriod')
+                            return dateRanges[this.selectedYear]?.payPeriods || [];
+                    },
+                }
+                }
+            <script>
+
+        - Good Example:
+            <select class="col-span-3 w-full bg-slate-50 border">
+                <template x-for="option in getDateRangeOptions()" :key="option"> 
+                    <option x-bind:value="option" x-text="option"></option>
+                </template>
+            </select>
+            ...
+            <script>
+                function financeControlPanelLogic(dateRanges) {
+                return {
+                    selectedYear: null,
+                    rangeMode: null,
+
+                    init() {
+                        this.selectedYear = new Date().getFullYear().toString();
+                        this.rangeMode = "payPeriod";
+                    },
+
+                    getDateRangeOptions() {
+                        if (this.rangeMode === 'month')
+                            return dateRanges[this.selectedYear]?.months || [];
+
+                        else if (this.rangeMode === 'payPeriod')
+                            return dateRanges[this.selectedYear]?.payPeriods || [];
+                    },
+                }
+                }
+            <script>
+
+    8) Use a Centralized Dispatch Function for Emitting Events
+        - All component events fired with $dispatch should be wrapped in a dedicated function, typically named dispatchChangeEvent(). This function should be responsible for structuring the event payload.
+        - Bad Example:
+            // Multiple dispatch calls scattered in the code
+            this.$watch('rangeMode', () => {
+                    // ... logic ...
+                    this.$dispatch('finance-panel-change', {
+                        timeGranularity: this.rangeMode,
+                        year: this.selectedYear,
+                        dateRangeDropdown: this.selectedDateRange,
+                        activeFilters: this.activeFilters
+                    });
+            });
+
+            this.$watch('activeFilters', () => {
+                    // ... logic ...
+                    this.$dispatch('finance-panel-change', {
+                        timeGranularity: this.rangeMode,
+                        year: this.selectedYear,
+                        dateRangeDropdown: this.selectedDateRange,
+                        activeFilters: this.activeFilters
+                    });
+            });
+
+        - Good Example:
+            // All watchers and methods call a single dispatch function
+            init() {
+                    this.$watch('rangeMode', () => {
+                        // ... logic ...
+                        this.dispatchChangeEvent();
+                    });
+            
+                    this.$watch('activeFilters', () => this.dispatchChangeEvent());
+            },
+
+            dispatchChangeEvent() {
+                    this.$dispatch('finance-panel-change', {
+                        timeGranularity: this.rangeMode,
+                        year: this.selectedYear,
+                        dateRangeDropdown: this.selectedDateRange,
+                        activeFilters: this.activeFilters
+                    });
+            },
+
+    9) Safely Manage Watcher Side Effects with State Flags
+        - When a watcher ($watch) modifies a reactive property that is itself being watched, use a boolean state flag (e.g., isUpdating, isLoading) to prevent infinite loops or unintended watcher execution. This will often arise when changing state of an element inside a component changes the state of another element inside the same component, and both have watchers that send out external events. 
+        - Bad Example:
+            // Bad Example - No flags, causes infinite loops and unpredictable behavior
+            init() {
+                // This watcher triggers when selectedYear changes
+                this.$watch('selectedYear', () => {
+                    const newOptions = this.getDateRangeOptions();
+                    this.selectedDateRange = newOptions[0] || null; // This triggers the watcher below!
+                    this.dispatchChangeEvent();
+                });
+                
+                // This watcher triggers when selectedDateRange changes
+                this.$watch('selectedDateRange', () => {
+                    this.dispatchChangeEvent(); // This runs even during programmatic updates
+                    
+                    // Even worse - if this watcher also modified selectedYear:
+                    // this.selectedYear = someNewValue; // Would create an infinite loop!
+                });
+            }
+        - Good Example:
+            init() {
+                this.isUpdating = false;
+
+                // This watcher TRIGGERS the controlled update
+                this.$watch('selectedYear', () => {
+                    this.isUpdating = true; // 1. Set the flag
+                    
+                    const newOptions = this.getDateRangeOptions();
+                    this.selectedDateRange = newOptions[0] || null; // 2. This change would normally trigger the watcher below
+                    
+                    this.dispatchChangeEvent();
+                    
+                    this.$nextTick(() => {
+                        this.isUpdating = false; // 4. Reset the flag after the DOM updates
+                    });
+                });
+
+                // This watcher RESPECTS the controlled update
+                this.$watch('selectedDateRange', () => {
+                    // 3. The flag prevents this watcher's logic from running during the update
+                    if (this.isUpdating) return; 
+
+                    this.dispatchChangeEvent();
+                });
+            }
+
+    10) Pass Server-Side Data Securely with @json
+        - Always use the @json Blade directive to pass PHP variables (especially arrays and objects) into your Alpine component's data. These variables will almost always be coming from the parent blade view, passed in via props, that is instantiating the component. The parent blade view got the variable from the Controller
+ 
+Database (MongoDB) rules and structure:
+
+    Our database has the following main collections:
+        users,
+        projects,
+        sub-projects,
+        hours,
+        globals
+
+    Each collection has an eloquent model in Laravel found under App/Models/
+    We will dive into each one in detail below.
+
+    users collection:
+        description: Every document represents one employee
+        name: users
+        eloquent model name: Users
+        current number of documents: ~150
+        documents added per day: <1
+        documents added per week: <1
+        documents added per month: ~1
+        documents added per fisacal quarter: ~3
+        documents added per year: ~12
+
+        document structure:
+        {
+            "_id": {
+                "$oid": <Object ID>
+            },
+            "name": <String> Usually First and Last, but some people have multiple last names,
+            "email": <String>,
+            "password": <String>",
+            "role": <String>,
+            "updated_at": {
+                "$date": <MongoDB UTC Date String>
+            },
+            "created_at": {
+                "$date": <MongoDB UTC Date String>
+            },
+            "remember_token": <String>,
+            "email_verified_at": {
+                "$date": <MongoDB UTC Date String>
+            },
+            "active": Boolean,
+            "nickname": String,
+            "perhourdollar": Int32,
+            "hour_rates": {
+                "<Year String>": Int32,
+                ...
+            },
+            "owner": Boolean,
+            "employee_number": Int32,
+            "wage_type": <String> either "Salaried" or "Hourly",
+            "spreadsheet_name": <String>,
+            "end_date": Either the string "N/A" if still active or a  <MongoDB UTC Date String> if they have left
+            "start_date": {
+                "$date":  <MongoDB UTC Date String>
+            },
+            "jobclass": <String>,
+            "expected_billable": <Boolean>
+        }
+
+        foreign keys and cross references:
+            email => hours collection's "user_email"
+
+        indexes:
+            _id,
+            email
+
+
+    projects collection:
+        description: Every document represents one project at the company. Every project has at least one or more sub-project. This can be identified via strings in the sub-projects array that match projectname field in the sub-projects collection along with the same projectcode value. There are some projects of interest to keep in mind. Any project that has is_internal set to true is not billable. 
+        name: projects
+        eloquent model name: Projects
+        current number of documents: ~850
+        documents added per day: <1
+        documents added per week: ~2
+        documents added per month: ~8
+        documents added per fiscal quarter: ~25
+        documents added per year: ~100
+
+        document structure:
+        {
+            "_id": {
+                "$oid": <Object ID>
+                },
+            "projectcode": <String>,
+            "projectname": <String>,
+            "datentp": {
+                "$date": <MongoDB UTC Date String>
+            },
+            "dateenergization": {
+                "$date": <MongoDB UTC Date String>
+            },
+            "dollarvalueinhouse": <Double>,
+            "projectmanager": <String>,
+            "projectstatus": <String>,
+            "sitelocation": <String>,
+            "billingmethod": <String>,
+            "clientcompany": <String>,
+            "clientcontactname": <String>,
+            "dateproposed": {
+                "$date": <MongoDB UTC Date String>
+            },
+            "country": <String>,
+            "state": <String>,
+            "utility": <String>,
+            "voltage": <String>,
+            "mwsize": <String>,
+            "updated_at": {
+                "$date": <MongoDB UTC Date String>
+            },
+            "created_at": {
+                "$date": <MongoDB UTC Date String>
+            },
+            "sub-projects": <Array<String>>
+            "ongoing": Boolean,
+            "projecttype": <Array<String>>,
+            "is_internal" <Boolean>
+        }
+
+        foreign keys and cross references:
+            projectcode => hours collection's "project_code"
+            projectcode => sub-projects collection's "projectcode"
+            sub-projects => Strings in this array match "projectname" value for a sub-project document. This, along with needing the projectcode, can be used to identify a sub-project in the sub-projects collection.
+
+        indexes:
+            _id
+
+    sub-projects collection:
+        description: Every document in this collection represents a sub-project. sub-project names are not unique, so they must be paired with the parent "projectcode" to be unique. Special sub-projects of note, if the projectcode is "CEG" and the sub-project projectname is within the 200 codes global document, then it represents a 200 code, meaning excused time off 
+        name: sub-projects
+        eloquent model name: SubProjects
+        current number of documents: ~1000
+        documents added per day: ~1
+        documents added per week: ~7
+        documents added per month: ~30
+        documents added per fiscal quarter: ~90
+        documents added per year: ~ 300
+
+        document structure:
+        {
+            "_id": {
+                "$oid": <Object ID>
+                },
+            "projectcode": <String>,
+            "projectname": <String>,
+            "datentp": {
+                "$date": <MongoDB UTC Date String>
+            },
+            "dateenergization": {
+                "$date": <MongoDB UTC Date String>
+            },
+            "dollarvalueinhouse": <Double>,
+            "projectmanager": <String>,
+            "projectstatus": <String>,
+            "sitelocation": <String>,
+            "billingmethod": <String>,
+            "clientcompany": <String>,
+            "clientcontactname": <String>,
+            "dateproposed": {
+                "$date": <MongoDB UTC Date String>
+            },
+            "country": <String>,
+            "state": <String>,
+            "utility": <String>,
+            "voltage": <String>,
+            "mwsize": <String>,
+            "updated_at": {
+                "$date": <MongoDB UTC Date String>
+            },
+            "created_at": {
+                "$date": <MongoDB UTC Date String>
+            },
+            "is_billable": <Boolean>,
+            "sub-projects": <Array<String>>
+            "ongoing": Boolean,
+            "projecttype": <Array<String>>
+        }
+
+        foreign keys and cross references:
+                projectcode => hours collection's "project_code"
+                projectcode => projects collection's projectcode"
+                projectname => hours collection's "sub_project"
+                projectname => match a string in the parent project's sub-projects array
+
+            indexes:
+                _id,
+
+    hours collection:
+        description: The hours collection holds one document for every timesheet entry for one employee. 
+        name: hours
+        eloquent model name: Hours
+        current number of documents: ~250,000
+        documents added per day: ~180
+        documents added per week: ~1,250
+        documents added per month: ~5,500
+        documents added per fiscal quarter: ~ 16,500
+        documents added per year: ~70,000
+
+        document structure:
+            {
+                "_id": {
+                    "$oid": <Object ID>
+                },
+                "project_code": <String>,
+                "sub_project": <String>,
+                "activity_code": <String>,
+                "date": {
+                    "$date": <MongoDB UTC Date String>
+                },
+                "user_email": <String>,
+                "hours": <Double>,
+                "updated_at": {
+                    "$date": <MongoDB UTC Date String>
+                }
+            }
+        
+        foreign keys and cross references:
+            user_email => users collection's "email"
+            project_code => projects collection's "projectcode"
+            sub_project => a string value in the array for the value of the "sub-projects" field. Note this one is not unique so cannot actually be used as a foreign key, but is unique if you include the project code. 
+            sub_project => sub-projects collection's "projectname". Note this one is not unique so cannot actually be used as a foreign key, but is unique if you include the project code. 
+
+        indexes:
+            _id,
+            date->project_code->user_email,
+            date->user_email->project_code,
+            user_email->date->project_code,
+            user_email->project_code->date,
+            project_code->date->user_email
+
+    globals collection:
+        description: This is not like the other collections that all hold many documents of the same schema. This collection holds one-off documents that hold useful information across the website that is consistently referenced. We will just include all the documents below for reference:
+        name: globals
+        eloquent model name: Globals:
+
+        documents:
+        [
+        {
+        "_id": {
+            "$oid": "671bf5efe138f9e74264c2c3"
+        },
+        "name": "activity_codes",
+        "general": [
+            "General",
+            "Drawing",
+            "Studies",
+            "Project Manangement",
+            "Research and Development",
+            "Travel",
+            "Construction Support in Office",
+            "Construction Support in Field",
+            "Procurement",
+            "Administrative",
+            "Billing",
+            "Warranty"
+        ],
+        "drawing": [
+            "Drawing - Title Sheet",
+            "Drawing - Plot Plan",
+            "Drawing - Schedule",
+            "Drawing - Oneline",
+            "Drawing - Schematic Diagram",
+            "Drawing - Communication Architecture",
+            "Drawing - Trench",
+            "Drawing - Elevation",
+            "Drawing - Grounding"
+        ],
+        "studies": [
+            "Study - Ampacity",
+            "Study - Arc Flash",
+            "Study - Dispatch/Degredation",
+            "Study - Fault Current",
+            "Study - Grounding",
+            "Study - Power Flow",
+            "Study - Reactive",
+            "Study - Relay and Coordination",
+            "Study - Sound"
+        ]
+        },
+        {
+        "_id": {
+            "$oid": "671bffbd58244d4a53dd7bf6"
+        },
+        "name": "project_types",
+        "types": [
+            "Solar",
+            "Wind",
+            "Substation",
+            "SCADA",
+            "BESS",
+            "Support",
+            "Transmission",
+            "Other"
+        ]
+        },
+        {
+        "_id": {
+            "$oid": "671bffbd58244d4a53dd7bf7"
+        },
+        "name": "countries_list",
+        "countries": [
+            "Afghanistan",
+            ...
+            "Zimbabwe"
+        ]
+        },
+        {
+        "_id": {
+            "$oid": "671bffbd58244d4a53dd7bf8"
+        },
+        "name": "US_states_and_territories_list",
+        "states_and_territories": [
+            "Alabama",
+            ...
+            "Wyoming"
+        ]
+        },
+        {
+        "_id": {
+            "$oid": "672121f1ba4d4a49a4de3009"
+        },
+        "name": "billing_methods_list",
+        "billing_methods": [
+            "Time and Materials",
+            "Schedule of Values",
+            "Lump Sum"
+        ]
+        },
+        {
+        "_id": {
+            "$oid": "672122e303bc70a2fb6036e4"
+        },
+        "name": "project_statuses_list",
+        "project_statuses": [
+            "Won",
+            "Done and Billing Complete",
+            "Expired",
+            "Proposed",
+            "Probable"
+        ]
+        },
+        {
+        "_id": {
+            "$oid": "674656994ca3cfe724b038c6"
+        },
+        "name": "proposal_statuses_list",
+        "proposal_statuses": [
+            "Proposed",
+            "Probable"
+        ]
+        },
+        {
+        "_id": {
+            "$oid": "6750b511c64f3acd19ba9e0b"
+        },
+        "name": "Pay-Periods",
+        "Pay-Periods": {
+            "2018": [
+            {
+                "start_date": {
+                "$date": "2018-01-01T00:00:00.000Z"
+                },
+                "end_date": {
+                "$date": "2018-01-13T23:59:59.999Z"
+                }
+            },
+            ...
+            {
+                "start_date": {
+                "$date": "2018-12-30T00:00:00.000Z"
+                },
+                "end_date": {
+                "$date": "2018-12-31T23:59:59.999Z"
+                }
+            }
+            ],
+            "2019": [
+            {
+                "start_date": {
+                "$date": "2019-01-01T00:00:00.000Z"
+                },
+                "end_date": {
+                "$date": "2019-01-12T23:59:59.999Z"
+                }
+            },
+            ...
+            ]
+        }
+        },
+        {
+        "_id": {
+            "$oid": "6750b67ec64f3acd19bab8a8"
+        },
+        "name": "Fiscal-Quarters",
+        "Fiscal-Quarters": {
+            "2018": {
+            "Q1": {
+                "start_date": {
+                "$date": "2018-01-01T00:00:00.000Z"
+                },
+                "end_date": {
+                "$date": "2018-03-31T23:59:59.999Z"
+                }
+            },
+            "Q2": {
+                "start_date": {
+                "$date": "2018-04-01T00:00:00.000Z"
+                },
+                "end_date": {
+                "$date": "2018-06-30T23:59:59.999Z"
+                }
+            },
+            "Q3": {
+                "start_date": {
+                "$date": "2018-07-01T00:00:00.000Z"
+                },
+                "end_date": {
+                "$date": "2018-09-30T23:59:59.999Z"
+                }
+            },
+            "Q4": {
+                "start_date": {
+                "$date": "2018-10-01T00:00:00.000Z"
+                },
+                "end_date": {
+                "$date": "2018-12-31T23:59:59.999Z"
+                }
+            }
+            },
+            "2019": {
+            "Q1": {
+                "start_date": {
+                "$date": "2019-01-01T00:00:00.000Z"
+                },
+                "end_date": {
+                "$date": "2019-03-31T23:59:59.999Z"
+                }
+            }
+            ...
+        }
+        },
+        {
+        "_id": {
+            "$oid": "6787dc7bb4191483d9c17b83"
+        },
+        "name": "clients_to_abbreviations",
+        "mapping": {
+            "Adapture": "ADPT",
+            "Aid Electric": "SMA",
+            "Akuo Energy": "AK",
+            "Apex": "APEX",
+            "Aspenall": "ASP",
+            "BayWa": "BAY",
+            ...
+            "Ziegler Power Systems": "ZPS"
+        }
+        },
+        {
+        "_id": {
+            "$oid": "6787dcea2fea780e0a906746"
+        },
+        "name": "CEG_clients_list",
+        "clients": [
+            "Adapture",
+            "Aid Electric",
+            "Akuo Energy",
+            "Apex",
+            "Aspenall",
+            ...
+            "Ziegler Power Systems"
+        ]
+        },
+        {
+        "_id": {
+            "$oid": "6883b4b3e226e2687ef9ce7a"
+        },
+        "name": "200_codes", // Excused Time off codes. projectcode must be "CEG"
+        "200_codes": [
+            "Parental Leave",
+            "Jury Duty",
+            "Funeral",
+            "FMLA"
+        ]
+        }]
+    
+
+    Aggregation Pipeline Guideline:
+        - As stated in the Controller section, we will almost always use raw MongoDB aggregation pipelines for getting data inside a controller. The only exception to this is when the query is a simple match query.
+        - We need to take extra precaution to be as efficient as possible when writing these pipelines. We need to be smart about our match query, the order in which we group documents, and trying to reduce the amount of documents we need to lookup (Left Outer Join). To do this, we must take into account the size of the collections we are dealing with and how many documents we should expect after each matching stage. This data can be found/inferred based on the number of documents info in each collection.
+        - We will showcase an example of paying attention to the efficiency below:
+
+            Scenario: We need to aggregate hours data per employee for a certain range of time.
+            Bad example: In this example, we can expect around 5500 documents returned from the match stage. We know this because the maximum date range for this particular usecase is a month, and there are around 5500 documents per month in the hours collection based on the data provided in this MongoDB guide. We then perform 5500 lookups to the user collection, despite there only being around 150 users. This is hugely inefficient. We should group by user first to reduce the amount of lookups by >90%. For reference, this query took 600ms when exectued.
+
+                $pipeline = [
+                    // Stage 1: Match hours within the date range
+                    [
+                        '$match' => [
+                            'date' => [
+                                '$gte' => new \MongoDB\BSON\UTCDateTime($startDate->getTimestamp() * 1000),
+                                '$lte' => new \MongoDB\BSON\UTCDateTime($endDate->getTimestamp() * 1000),
+                            ],
+                        ],
+                    ],
+                    // Stage 2: Lookup users. Notice we should expect around 5500 documents returned from stage 1, and now we will execute 5500 look-ups! This is bad!
+                    [
+                        '$lookup' => [
+                            'from' => 'users',
+                            'localField' => 'user_email',
+                            'foreignField' => 'email',
+                            'as' => 'user',
+                        ],
+                    ],
+                    // Stage 3: Deconstruct the user array
+                    [
+                        '$unwind' => '$user',
+                    ],
+                    // Stage 4: Apply user filters if any
+                    ($userMatchFilter) ? ['$match' => $userMatchFilter] : null,
+                    // ---------------------------------------------
+                    // Stage 5: Group by employee to calculate hours
+                    [
+                        '$group' => [
+                            '_id' => [
+                                'employee_id' => '$user.employee_number',
+                                'name' => '$user.name',
+                            ],
+                            'expected_billable' => ['$first' => '$user.expected_billable'], 
+                            'pto' => [
+                                '$sum' => [
+                                    '$cond' => [
+                                        'if' => [
+                                            '$and' => [
+                                                ['$eq' => ['$project_code', 'CEG']],
+                                                ['$eq' => ['$sub_project', 'PTO']],
+                                            ],
+                                        ],
+                                        'then' => '$hours',
+                                        'else' => 0,
+                                    ],
+                                ],
+                            ],
+                            'holiday' => [
+                                '$sum' => [
+                                    '$cond' => [
+                                        'if' => [
+                                            '$and' => [
+                                                ['$eq' => ['$project_code', 'CEG']],
+                                                ['$eq' => ['$sub_project', 'Holiday']],
+                                            ],
+                                        ],
+                                        'then' => '$hours',
+                                        'else' => 0,
+                                    ],
+                                ],
+                            ],
+                            'other_200' => [
+                                '$sum' => [
+                                    '$cond' => [
+                                        'if' => [
+                                            '$and' => [
+                                                ['$eq' => ['$project_code', 'CEG']],
+                                                ['$in' => ['$sub_project', $codes_200]],
+                                                ['$ne' => ['$sub_project', 'PTO']],
+                                                ['$ne' => ['$sub_project', 'Holiday']],
+                                            ],
+                                        ],
+                                        'then' => '$hours',
+                                        'else' => 0,
+                                    ],
+                                ],
+                            ],
+                            'other_nb' => [
+                                '$sum' => [
+                                    '$cond' => [
+                                        'if' => [
+                                            '$and' => [
+                                                // Condition 1: Must be an internal project.
+                                                ['$in' => ['$project_code', $internalProjectCodes]],
+                                                // Condition 2: And it must NOT be one of the specific CEG categories
+                                                // that are already being calculated separately.
+                                                ['$or' => [
+                                                    // It's an internal project other than CEG.
+                                                    ['$ne' => ['$project_code', 'CEG']],
+                                                    // Or it IS CEG, but its sub-project is not one of the special cases.
+                                                    ['$and' => [
+                                                        ['$eq' => ['$project_code', 'CEG']],
+                                                        ['$not' => ['$in' => ['$sub_project', $allSpecialCEGSubProjects]]]
+                                                    ]]
+                                                ]]
+                                            ]
+                                        ],
+                                        'then' => '$hours',
+                                        'else' => 0,
+                                    ],
+                                ],
+                            ],
+                            'billable' => [
+                                '$sum' => [
+                                    '$cond' => [
+                                        'if' => [
+                                            '$and' => [
+                                                ['$ne' => ['$project_code', 'CEG']],
+                                                ['$not' => ['$in' => ['$project_code', $internalProjectCodes]]],
+                                            ],
+                                        ],
+                                        'then' => '$hours',
+                                        'else' => 0,
+                                    ],
+                                ],
+                            ],
+                            'total_hours' => ['$sum' => '$hours'],
+                        ],
+                    ],
+                    // Stage 6: Project the final structure
+                    [
+                        '$project' => [
+                            '_id' => 0,
+                            'employee_name' => '$_id.name',
+                            'employee_id' => '$_id.employee_id',
+                            'expected_billable' => '$expected_billable',
+                            'pto' => '$pto',
+                            'holiday' => '$holiday',
+                            'other_200' => '$other_200',
+                            'other_nb' => '$other_nb',
+                            'total_nb' => [
+                                '$add' => ['$pto', '$holiday', '$other_200', '$other_nb'],
+                            ],
+                            'billable' => '$billable',
+                            'total_hours' => '$total_hours',
+                            'billable_percentage' => [
+                                '$cond' => [
+                                    'if' => ['$gt' => ['$total_hours', 0]],
+                                    'then' => [
+                                        '$multiply' => [['$divide' => ['$billable', '$total_hours']], 100],
+                                    ],
+                                    'else' => 0,
+                                ],
+                            ],
+                            'overtime' => [
+                                '$cond' => [
+                                    'if' => ['$gt' => ['$total_hours', 80]],
+                                    'then' => ['$subtract' => ['$total_hours', 80]],
+                                    'else' => 0,
+                                ],
+                            ],
+                        ],
+                    ],
+                    // Stage 7: Sort the results by employee name
+                    [
+                        '$sort' => [
+                            'employee_name' => 1
+                        ]
+                    ]
+                ];
+
+            Good Example: Notice now we group by employee to drastically reduce the number of lookups we need to do. This reduced our actual execution time from 600ms to 42ms.
+                 $pipeline = [
+                    // Stage 1: Match hours within the date range (Unchanged)
+                    [
+                        '$match' => [
+                            'date' => [
+                                '$gte' => new \MongoDB\BSON\UTCDateTime($startDate->getTimestamp() * 1000),
+                                '$lte' => new \MongoDB\BSON\UTCDateTime($endDate->getTimestamp() * 1000),
+                            ],
+                        ],
+                    ],
+
+                    // Stage 2: [NEW] Pre-group by user email to reduce lookup operations
+                    [
+                        '$group' => [
+                            '_id' => '$user_email',
+                            // Store all related hour documents in an array for later processing
+                            'hours_entries' => ['$push' => '$$ROOT'],
+                        ],
+                    ],
+
+                    // Stage 3: [NEW] Perform the lookup on the much smaller, grouped dataset
+                    [
+                        '$lookup' => [
+                            'from' => 'users',
+                            'localField' => '_id', // Join on the grouped user_email
+                            'foreignField' => 'email',
+                            'as' => 'userInfo', // Use a new name to avoid conflicts
+                        ],
+                    ],
+
+                    // Stage 4: [NEW] Deconstruct the userInfo array
+                    [
+                        '$unwind' => '$userInfo',
+                    ],
+
+                    // Stage 5: [MOVED & MODIFIED] Apply user filters *after* the lookup
+                    // IMPORTANT: Your filter logic must now reference the 'userInfo' object.
+                    // e.g., 'user.active' becomes 'userInfo.active'
+                    ($userMatchFilter) ? ['$match' => $userMatchFilter] : null,
+
+                    // Stage 6: [NEW] Deconstruct the hours_entries array to process each entry
+                    [
+                        '$unwind' => '$hours_entries',
+                    ],
+
+                    // Stage 7: [MODIFIED] Final grouping for calculations. All field paths are updated.
+                    [
+                        '$group' => [
+                            '_id' => [
+                                'employee_id' => '$userInfo.employee_number', // Path updated
+                                'name' => '$userInfo.name',                   // Path updated
+                            ],
+                            'expected_billable' => ['$first' => '$userInfo.expected_billable'], // Path updated
+                            'pto' => [
+                                '$sum' => [
+                                    '$cond' => [
+                                        'if' => [
+                                            '$and' => [
+                                                // Paths updated to look inside 'hours_entries'
+                                                ['$eq' => ['$hours_entries.project_code', 'CEG']],
+                                                ['$eq' => ['$hours_entries.sub_project', 'PTO']],
+                                            ],
+                                        ],
+                                        'then' => '$hours_entries.hours', // Path updated
+                                        'else' => 0,
+                                    ],
+                                ],
+                            ],
+                            'holiday' => [
+                                '$sum' => [
+                                    '$cond' => [
+                                        'if' => [
+                                            '$and' => [
+                                                ['$eq' => ['$hours_entries.project_code', 'CEG']],
+                                                ['$eq' => ['$hours_entries.sub_project', 'Holiday']],
+                                            ],
+                                        ],
+                                        'then' => '$hours_entries.hours', // Path updated
+                                        'else' => 0,
+                                    ],
+                                ],
+                            ],
+                            'other_200' => [
+                                '$sum' => [
+                                    '$cond' => [
+                                        'if' => [
+                                            '$and' => [
+                                                ['$eq' => ['$hours_entries.project_code', 'CEG']],
+                                                ['$in' => ['$hours_entries.sub_project', $codes_200]],
+                                                ['$ne' => ['$hours_entries.sub_project', 'PTO']],
+                                                ['$ne' => ['$hours_entries.sub_project', 'Holiday']],
+                                            ],
+                                        ],
+                                        'then' => '$hours_entries.hours', // Path updated
+                                        'else' => 0,
+                                    ],
+                                ],
+                            ],
+                            'other_nb' => [
+                                '$sum' => [
+                                    '$cond' => [
+                                        'if' => [
+                                            '$and' => [
+                                                ['$in' => ['$hours_entries.project_code', $internalProjectCodes]],
+                                                ['$or' => [
+                                                    ['$ne' => ['$hours_entries.project_code', 'CEG']],
+                                                    ['$and' => [
+                                                        ['$eq' => ['$hours_entries.project_code', 'CEG']],
+                                                        ['$not' => ['$in' => ['$hours_entries.sub_project', $allSpecialCEGSubProjects]]]
+                                                    ]]
+                                                ]]
+                                            ]
+                                        ],
+                                        'then' => '$hours_entries.hours', // Path updated
+                                        'else' => 0,
+                                    ],
+                                ],
+                            ],
+                            'billable' => [
+                                '$sum' => [
+                                    '$cond' => [
+                                        'if' => [
+                                            '$and' => [
+                                                ['$ne' => ['$hours_entries.project_code', 'CEG']],
+                                                ['$not' => ['$in' => ['$hours_entries.project_code', $internalProjectCodes]]],
+                                            ],
+                                        ],
+                                        'then' => '$hours_entries.hours', // Path updated
+                                        'else' => 0,
+                                            ],
+                                        ],
+                                    ],
+                            'total_hours' => ['$sum' => '$hours_entries.hours'], // Path updated
+                        ],
+                    ],
+
+                    // Stage 8: Project the final structure (Unchanged)
+                    [
+                        '$project' => [
+                            '_id' => 0,
+                            'employee_name' => '$_id.name',
+                            'employee_id' => '$_id.employee_id',
+                            'expected_billable' => '$expected_billable',
+                            'pto' => '$pto',
+                            'holiday' => '$holiday',
+                            'other_200' => '$other_200',
+                            'other_nb' => '$other_nb',
+                            'total_nb' => [
+                                '$add' => ['$pto', '$holiday', '$other_200', '$other_nb'],
+                            ],
+                            'billable' => '$billable',
+                            'total_hours' => '$total_hours',
+                            'billable_percentage' => [
+                                '$cond' => [
+                                    'if' => ['$gt' => ['$total_hours', 0]],
+                                    'then' => [
+                                        '$multiply' => [['$divide' => ['$billable', '$total_hours']], 100],
+                                    ],
+                                    'else' => 0,
+                                ],
+                            ],
+                            'overtime' => [
+                                '$cond' => [
+                                    'if' => ['$gt' => ['$total_hours', 80]],
+                                    'then' => ['$subtract' => ['$total_hours', 80]],
+                                    'else' => 0,
+                                ],
+                            ],
+                        ],
+                    ],
+
+                    // Stage 9: Sort the results by employee name (Unchanged)
+                    [
+                        '$sort' => [
+                            'employee_name' => 1
+                        ]
+                    ]
+                ];
+        
+        - Besides Aggregation Pipeline Efficiency, there are some smaller details to pay attention to. If your aggregation pipeline might need to dynamically remove an empty stage like we might need to do in the above example, you must use array_values to re-index the array.
+            Bad example:
+                 // Remove null stage if no user filters are active
+                $pipeline = array_filter($pipeline); // Will not reindex and will later fail!
+
+            Good example:
+                 // Remove null stage if no user filters are active
+                $pipeline = array_values(array_filter($pipeline));
+
+        - After we run the pipeline, we will use the toArray() method to work with just the actual data, and not Eloquent Model instances
+            Bad example:
+                $cursor = Hours::raw(function ($collection) use ($pipeline) {
+                    return $collection->aggregate($pipeline);
+                });
+                $models = iterator_to_array($cursor);
+
+            
+            Good example:
+                $results = Hours::raw(function ($collection) use ($pipeline) {
+                    return $collection->aggregate($pipeline);
+                })->toArray();
+    

@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"date":{"$numberInt":"1"},"ns_employee_id":{"$numberInt":"1"},"ns_project_id":{"$numberInt":"1"}},"name":"date_1_ns_employee_id_1_ns_project_id_1"}],"uuid":"809d2cbe43d14f5eaf3310c683b851a4","collectionName":"netsuite_timebills","type":"collection"}

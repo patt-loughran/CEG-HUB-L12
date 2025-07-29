@@ -6,7 +6,7 @@ use MongoDB\Laravel\Eloquent\Model;
 
 class TestModel extends Model
 {
-      // Explicitly set the connection if it's not your default
+    // Explicitly set the connection if it's not your default
     protected $connection = 'mongodb';
 
     // Set the collection name

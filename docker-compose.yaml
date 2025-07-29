@@ -43,6 +43,7 @@ services:
       MONGO_INITDB_DATABASE: ceg_hub_database
     volumes:
       - mongodb_data:/data/db
+      - ./prod_data:/prod_data
       - ./docker/mongodb/init:/docker-entrypoint-initdb.d
     networks:
       - main-network
@@ -61,7 +62,11 @@ services:
       - "5173:5173"  # Vite dev server
     networks:
       - main-network
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - CHOKIDAR_INTERVAL=1000 # Check every 1000ms (1 second)
+    #command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --debug"
     restart: unless-stopped
 
 # Define networks
