@@ -33,7 +33,7 @@
 <div
     x-data="dataBridge()"
     x-on:control-panel-change.window="fetchData($event)"
-    style="display: none;"
+    class="hidden"
 ></div>
 
 @push('scripts')
@@ -48,13 +48,14 @@ function dataBridge() {
          * @param {CustomEvent} event The event dispatched from the control panel.
          */
         async fetchData(event) {
+            console.log("in fetch data");
             this.isLoading = true;
             this.error = null;
             const payload = event.detail;
 
             // Log the payload for debugging purposes
             console.log('Data Bridge received new filter data:', payload);
-
+            this.$dispatch('payroll-data-loading');
             try {
                 // Perform a fetch request to our API endpoint
                 const response = await fetch('/finance/payroll/getdata', {
@@ -70,21 +71,20 @@ function dataBridge() {
 
                 // Check if the request was successful
                 if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`Server responded with ${response.status}: ${errorText}`);
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP ${response.status}`);
                 }
 
                 const data = await response.json();
 
                 // Dispatch a new event with the fetched data for other components
-                this.$dispatch('table-data-updated', data);
+                this.$dispatch('payroll-data-updated', data);
                 console.log('Data Bridge dispatched new data:', data);
 
             } catch (error) {
                 this.error = error.message;
-                console.error('Data Bridge Error:', error);
-                // Optionally dispatch an error event
-                this.$dispatch('finance-data-error', { message: error.message });
+                console.error('Payroll data error:', error.message);
+                this.$dispatch('payroll-data-error', { message: error.message });
             } finally {
                 this.isLoading = false;
             }

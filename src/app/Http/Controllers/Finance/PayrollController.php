@@ -33,19 +33,9 @@ class PayrollController extends Controller
         
         $payPeriodsData = $payPeriodsDoc->{'Pay-Periods'};
         $result = [];
-        
-        // Get current year and month
-        $currentYear = (int)date('Y');
-        $currentMonth = (int)date('n'); // 1-12
 
         $currentDate = Carbon::today();
-        
-        // All months array
-        $allMonths = [
-            'January', 'February', 'March', 'April',
-            'May', 'June', 'July', 'August',
-            'September', 'October', 'November', 'December'
-        ];
+        $currentYear = (int)date('Y');
         
         // Process each year
         foreach ($payPeriodsData as $year => $periods) {
@@ -86,30 +76,16 @@ class PayrollController extends Controller
                 return (int)$matchB[1] <=> (int)$matchA[1]; // Descending
             });
             
-            // Determine which months to include
-            if ((int)$year < $currentYear) {
-                // Past years: include all 12 months
-                $months = $allMonths;
-            } elseif ((int)$year == $currentYear) {
-                // Current year: include months up to and including current month
-                $months = array_slice($allMonths, 0, $currentMonth);
-            } else {
-                // Future years: no months
-                $months = [];
-            }
-            
-            $result[$year] = [
-                'payPeriods' => $payPeriods,
-                'months' => $months
-            ];
+            $result[$year] = $payPeriods;
         }
     
     return $result;
     }
 
     public function getData(Request $request) {
+        try{
+
         $validated = $request->validate([
-        'timeGranularity' => 'required|string|in:month,payPeriod',
         'year' => 'required|string',
         'dateRangeDropdown' => 'required|string',
         'activeFilters' => 'required|array'
@@ -120,30 +96,23 @@ class PayrollController extends Controller
         $endDate = null;
         $activeFilters = $validated['activeFilters'];
 
-        if ($validated['timeGranularity'] === 'month') {
-            // Parse a full month name, e.g., "January 2024"
-            $dateString = $validated['dateRangeDropdown'] . ' ' . $year;
-            $startDate = Carbon::parse($dateString)->startOfMonth();
-            $endDate = Carbon::parse($dateString)->endOfMonth();
-        } 
-        else { // 'payPeriod'
-            // Use regex to extract the MM/DD parts from a string like "PP 05 (03/16 - 03/29)"
-            preg_match('/\((\d{2}\/\d{2}) - (\d{2}\/\d{2})\)/', $validated['dateRangeDropdown'], $matches);
+        // Use regex to extract the MM/DD parts from a string like "PP 05 (03/16 - 03/29)"
+        preg_match('/\((\d{2}\/\d{2}) - (\d{2}\/\d{2})\)/', $validated['dateRangeDropdown'], $matches);
 
-            if (count($matches) === 3) {
-                $startString = $matches[1] . '/' . $year; // e.g., "03/16/2024"
-                $endString = $matches[2] . '/' . $year;   // e.g., "03/29/2024"
+        if (count($matches) === 3) {
+            $startString = $matches[1] . '/' . $year; // e.g., "03/16/2024"
+            $endString = $matches[2] . '/' . $year;   // e.g., "03/29/2024"
 
-                $startDate = Carbon::createFromFormat('m/d/Y', $startString)->startOfDay();
-                $endDate = Carbon::createFromFormat('m/d/Y', $endString)->endOfDay();
+            $startDate = Carbon::createFromFormat('m/d/Y', $startString)->startOfDay();
+            $endDate = Carbon::createFromFormat('m/d/Y', $endString)->endOfDay();
 
-                // NUANCE: Handle pay periods that cross over into the next year.
-                // If the end date is earlier in the year than the start date, it must be in the following year.
-                if ($endDate->lt($startDate)) {
-                    $endDate->addYear();
-                }
+            // NUANCE: Handle pay periods that cross over into the next year.
+            // If the end date is earlier in the year than the start date, it must be in the following year.
+            if ($endDate->lt($startDate)) {
+                $endDate->addYear();
             }
         }
+
          // Failsafe: if date parsing failed for any reason, return an error.
         if (!$startDate || !$endDate) {
             return response()->json(['error' => 'Could not determine a valid date range.'], 400);
@@ -386,10 +355,18 @@ class PayrollController extends Controller
             'averageBillablePercentage' => round($averageBillablePercentage, 2),
             'payPeriodIdentifier' => $validated['dateRangeDropdown']
         ];
-
-        Log::debug($response);
-
         return response()->json($response);
+
+        } catch (\Exception $e) {
+        Log::error('PayrollController getData error: ' . $e->getMessage(), [
+            'trace' => $e->getTraceAsString(),
+            'request' => $request->all()
+        ]);
+        
+        return response()->json([
+            'error' => $e->getMessage()
+        ], 500);
+    }
     }
 
 }

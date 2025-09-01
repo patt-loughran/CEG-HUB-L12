@@ -1,11 +1,8 @@
 {{-- 
     This component expects a single prop: 'dateRanges'.
-    The expected data structure is an associative array:
+    The expected data structure is now an associative array:
     [
-        '2024' => [
-            'payPeriods' => ['PP 27 (12/15 - 12/31)', 'PP26 (12/01 - 12/14)', ...],
-            'months' => ['January', 'February'...]
-        ],
+        '2024' => ['PP 27 (12/15 - 12/31)', 'PP26 (12/01 - 12/14)', ...],
         '2023' => [ ... ]
     ]
 --}}
@@ -16,16 +13,9 @@
 
         <!-- Date Selection Section -->
         <div class="space-y-3">
-           <!-- Header with Label and Toggle -->
+           <!-- Header with Label -->
             <div class="flex justify-between items-center">
-                <label class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Date Range Selection</label>
-                <x-general.toggle-switch
-                    :options="[
-                        ['value' => 'month', 'label' => 'Month'],
-                        ['value' => 'payPeriod', 'label' => 'Pay Period']
-                    ]"
-                    model="rangeMode"
-                />
+                <label class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Pay Period Selection</label>
             </div>
             <!-- Proportional Dropdowns Container -->
             <div class="grid grid-cols-4 gap-2">
@@ -67,93 +57,82 @@
 </div>
 
 
-{{-- And its contents will be PUSHED to the 'scripts' stack --}}
+{{-- The Alpine.js logic is pushed to the 'scripts' stack --}}
 @push('scripts')
 <script>
     function financeControlPanelLogic(dateRanges) {
-    return {
-        rangeMode: null,
-        selectedYear:  null,
-        selectedDateRange: null,
-        activeFilters: null,
-        isUpdating: null,
+        return {
+            selectedYear:  null,
+            selectedDateRange: null,
+            activeFilters: null,
+            isUpdating: null,
 
-        init() {
-            // Initialize Instance Variables
-            this.rangeMode = 'payPeriod';
-            this.selectedYear = new Date().getFullYear().toString();
-            this.selectedDateRange = this.getDateRangeOptions()[0] || null;
-            this.activeFilters = ["active"]
-            this.isUpdating = false;
+            init() {
+                // Initialize Instance Variables
+                this.selectedYear = new Date().getFullYear().toString();
+                this.selectedDateRange = this.getDateRangeOptions()[0] || null;
+                this.activeFilters = ["active"]
+                this.isUpdating = false;
 
-            // set up watchers //
+                // Set up watchers //
 
-            // rangeMode Watcher
-            this.$watch('rangeMode', () => {
-                this.isUpdating = true;
-                const newOptions = this.getDateRangeOptions();
-                this.selectedDateRange = newOptions[0] || null;
-                this.dispatchChangeEvent();
-                this.$nextTick(() => {
-                    this.isUpdating = false;
+                // selectedYear Watcher
+                this.$watch('selectedYear', () => {
+                    this.isUpdating = true;
+                    const newOptions = this.getDateRangeOptions();
+                    this.selectedDateRange = newOptions[0] || null;
+                    this.dispatchChangeEvent();
+                    this.$nextTick(() => {
+                        this.isUpdating = false;
+                    });
                 });
-            });
 
-            // selectedYear Watcher
-            this.$watch('selectedYear', () => {
-                this.isUpdating = true;
-                const newOptions = this.getDateRangeOptions();
-                this.selectedDateRange = newOptions[0] || null;
-                this.dispatchChangeEvent();
-                this.$nextTick(() => {
-                    this.isUpdating = false;
+                // selectedDateRange Watcher   
+                this.$watch('selectedDateRange', () => {
+                    if (this.isUpdating) return; 
+
+                    this.dispatchChangeEvent()
                 });
-            });
+                
+                // activeFilters Watcher 
+                this.$watch('activeFilters', () => this.dispatchChangeEvent());
 
-            // selectedDateRange Watcher   
-            this.$watch('selectedDateRange', () => {
-                if (this.isUpdating) return; 
+                // Fire initial dispatch event with default values
+                this.$nextTick(() => {
+                    this.dispatchChangeEvent();
+                });
+            },
 
-                this.dispatchChangeEvent()
-            });
-            
-            // activeFilters Watcher 
-            this.$watch('activeFilters', () => this.dispatchChangeEvent());
+            getDateRangeOptions() {
+                // MODIFIED: This now correctly returns the array directly for the selected year.
+                return dateRanges[this.selectedYear] || [];
+            },
 
-            // Fire initial dispatch event with default values
-            this.dispatchChangeEvent();
-        },
+            getAvailableYears() {
+                return Object.keys(dateRanges).sort((a, b) => b - a); // Sort years descending
+            },
 
-        getDateRangeOptions() {
-            if (this.rangeMode === 'month')
-                return dateRanges[this.selectedYear]?.months || [];
+            toggleFilter(filter) {
+                const index = this.activeFilters.indexOf(filter);
+                if (index === -1) {
+                    this.activeFilters.push(filter);
+                } else {
+                    this.activeFilters.splice(index, 1);
+                }
+            },
 
-            else if (this.rangeMode === 'payPeriod')
-                return dateRanges[this.selectedYear]?.payPeriods || [];
-        },
-
-        getAvailableYears() {
-            return Object.keys(dateRanges).sort((a, b) => b - a); // Sort years descending (JS sorts ascending by default)
-        },
-
-        toggleFilter(filter) {
-            const index = this.activeFilters.indexOf(filter);
-            if (index === -1) {
-                this.activeFilters.push(filter);
-            } else {
-                this.activeFilters.splice(index, 1);
-            }
-        },
-
-        dispatchChangeEvent() {
-            this.$dispatch('control-panel-change', {
-                timeGranularity: this.rangeMode,
-                year: this.selectedYear,
-                dateRangeDropdown: this.selectedDateRange,
-                activeFilters: this.activeFilters
-            });
-        },
-    }
+            dispatchChangeEvent() {
+                console.log("dispatched");
+                console.log(this.selectedYear);
+                console.log(this.selectedDateRange);
+                console.log(this.activeFilters);
+                this.$dispatch('control-panel-change', {
+                    year: this.selectedYear,
+                    dateRangeDropdown: this.selectedDateRange,
+                    activeFilters: this.activeFilters
+                });
+            },
+        }
     }
 </script>
 @endpush
