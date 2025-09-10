@@ -1,1 +1,1 @@
-{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"}],"uuid":"fb63251d0d994d34922d68e6d39dfbf5","collectionName":"sub-projects","type":"collection"}
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"projectname":{"$numberInt":"1"}},"name":"projectname_1"},{"v":{"$numberInt":"2"},"key":{"projectcode":{"$numberInt":"1"}},"name":"projectcode_1"}],"uuid":"bdbfb70cead54d00b9098190694a64c3","collectionName":"sub-projects","type":"collection"}

@@ -5,12 +5,10 @@ namespace App\Http\Controllers\Finance;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 
-use App\Services\MongoDB\PipelineTimingAnalyzer; // Add this import
-
-use App\Models\Hours;
-use App\Models\Globals;
-use App\Models\Projects;
-use App\Models\Users;
+use App\Models\Hour;
+use App\Models\GlobalDoc;
+use App\Models\Project;
+use App\Models\User;
 use Log;
 use Carbon\Carbon;
 
@@ -25,7 +23,7 @@ class PayrollController extends Controller
     private function getDateRanges()
     {
         // Fetch the Pay-Periods document from MongoDB
-        $payPeriodsDoc = Globals::where('name', 'Pay-Periods')->first();
+        $payPeriodsDoc = GlobalDoc::where('name', 'Pay-Periods')->first();
         
         if (!$payPeriodsDoc) {
             return [];
@@ -119,8 +117,8 @@ class PayrollController extends Controller
         }
 
         // 1. Fetch internal project codes and 200 codes
-        $internalProjectCodes = Projects::where('is_internal', true)->pluck('projectcode')->toArray();
-        $codes_200 = Globals::where('name', "200_codes")->first()?->{'200_codes'} ?? ['Parental Leave', 'Jury Duty', 'Funeral', 'Bereavement', 'FMLA', 'UTO'];
+        $internalProjectCodes = Project::where('is_internal', true)->pluck('projectcode')->toArray();
+        $codes_200 = GlobalDoc::where('name', "200_codes")->first()?->{'200_codes'} ?? ['Parental Leave', 'Jury Duty', 'Funeral', 'Bereavement', 'FMLA', 'UTO'];
         $allSpecialCEGSubProjects = array_unique(array_merge(['PTO', 'Holiday'], $codes_200));
 
         $userMatchFilter = [];
@@ -320,7 +318,7 @@ class PayrollController extends Controller
         // Remove null stage if no user filters are active
         $pipeline = array_values(array_filter($pipeline));
 
-        $results = Hours::raw(function ($collection) use ($pipeline) {
+        $results = Hour::raw(function ($collection) use ($pipeline) {
             return $collection->aggregate($pipeline);
         })->toArray();
 

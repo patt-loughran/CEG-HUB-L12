@@ -11,7 +11,11 @@ Route::get('/playground', [App\Http\Controllers\PlaygroundController::class, 'in
 Route::get('/finance/payroll', [App\Http\Controllers\Finance\PayrollController::class, 'index'])->name('finance.payroll');
 Route::post('/finance/payroll/getdata', [App\Http\Controllers\Finance\PayrollController::class, 'getData'])->name('finance.payroll.getdata');
 
-// Add this new route
+// Make sure these are within your authenticated middleware group
+Route::get('/time/timesheet', [App\Http\Controllers\Time\TimesheetController::class, 'index'])->name('time.timesheet');
+Route::post('/time/timesheet/data', [App\Http\Controllers\Time\TimesheetController::class, 'getData']);
+
+
 Route::get('/ping', function () {
     return 'pong';
 });

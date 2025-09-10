@@ -23,28 +23,31 @@
         {{-- Stat Tiles --}}
         <div class="flex flex-col sm:flex-row flex-wrap gap-6">
             
-            <x-finance.simple-stat 
+            <x-general.simple-stat 
                 title="Total Hours"
                 dataKey="totalHours"
                 format="hours"
                 iconClasses="bg-blue-100 text-blue-700"
                 iconName="simpleClock"
+                eventPrefix="payroll-data"
             />
             
-            <x-finance.simple-stat 
+            <x-general.simple-stat 
                 title="Billable Percentage"
                 dataKey="averageBillablePercentage"
                 format="percentage"
                 iconClasses="bg-green-100 text-green-700"
                 iconName="pieChart"
+                eventPrefix="payroll-data"
             />
 
-            <x-finance.simple-stat 
+            <x-general.simple-stat 
                 title="Total Overtime"
                 dataKey="totalOvertime"
                 format="hours"
                 iconClasses="bg-orange-100 text-orange-700"
                 iconName="warning"
+                eventPrefix="payroll-data"
             />
 
         </div>
