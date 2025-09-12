@@ -11,7 +11,7 @@
 {{-- Main Page Container --}}
 <div class="flex flex-col h-screen p-6 gap-6 max-w-[1840px] mx-auto">
 
-    {{-- TOP ROW: Stat Tiles --}}
+    {{-- TOP ROW: Stat Tiles (No changes here) --}}
     <div class="flex flex-col sm:flex-row flex-wrap gap-6">
         
         <x-general.simple-stat
@@ -45,10 +45,14 @@
 
     {{-- BOTTOM ROW: Main Timesheet Entry Component --}}
     <div class="flex-grow min-h-0">
-        <x-time.timesheet-entry :date-navigator-data="$dateNavigatorData" />
+        <x-time.timesheet-entry>
+            <x-slot name="slot">
+                <x-time.date-navigator :date-navigator-data="$dateNavigatorData" />
+            </x-slot>
+        </x-time.timesheet-entry>
     </div>
 
-    {{-- This component is headless and handles all data fetching for the page --}}
+    {{-- This component is headless and handles all data fetching for the page (No changes here) --}}
     <x-time.data-bridge />
 
 @stack('scripts')

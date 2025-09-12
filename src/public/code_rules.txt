@@ -499,6 +499,7 @@ Database (MongoDB) rules and structure:
         projects,
         sub-projects,
         hours,
+        pinned_projects,
         globals
 
     Each collection has an eloquent model in Laravel found under App/Models/
@@ -712,8 +713,8 @@ Database (MongoDB) rules and structure:
         foreign keys and cross references:
             user_email => users collection's "email"
             project_code => projects collection's "projectcode"
-            sub_project => a string value in the array for the value of the "sub-projects" field. Note this one is not unique so cannot actually be used as a foreign key, but is unique if you include the project code. 
-            sub_project => sub-projects collection's "projectname". Note this one is not unique so cannot actually be used as a foreign key, but is unique if you include the project code. 
+            sub_project => a string value in the array for the value of the "sub-projects" field in the "projects" collection. Note this one is not unique so cannot actually be used as a foreign key, but is unique if you include the project code. 
+            sub_project => sub-projects collection's "projectname". Note this one is not guarenteed to be unique so cannot actually be used as a foreign key, but is unique if you include the project code. 
 
         indexes:
             _id,
@@ -723,6 +724,37 @@ Database (MongoDB) rules and structure:
             user_email->project_code->date,
             project_code->date->user_email
 
+    pinned_projects:
+        description: Every document represents a unique project_code, sub_project, activity_code combo that a specific user has pinned in their timesheet. 
+        name: pinned_projects
+        eloquent model name: PinnedProject
+        current number of documents: ~500
+        documents added per day: ~0-1
+        documents added per week: ~2-5
+        documents added per month: ~5-15
+        documents added per fiscal quarter: ~ 15-45
+        documents added per year: ~ 50-100
+
+        document structure:
+        {
+            "_id": {
+                "$oid": <Object ID>
+            },
+            "user_email": <String>,
+            "project_code": <String>,
+            "sub_project": <String>,
+            "activity_code": <String>,
+        }
+
+        foreign keys and cross references:
+            user_email => users collection's "email"
+            user_email => hours collection's "user_email"
+            project_code => projects collection's "projectcode"
+            sub_project => a string value in the array for the value of the "sub-projects" field in the "projects" collection. Note this one is not unique so cannot actually be used as a foreign key, but is unique if you include the project code.
+
+        indexes:
+            none
+            sub_project => sub-projects collection's "projectname" Note this one is not guarenteed to be unique so cannot actually be used as a foreign key, but is unique if you include the project code. 
     globals collection:
         description: This is not like the other collections that all hold many documents of the same schema. This collection holds one-off documents that hold useful information across the website that is consistently referenced. We will just include all the documents below for reference:
         name: globals

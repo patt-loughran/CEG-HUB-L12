@@ -48,7 +48,7 @@
                 this.error = null;
             },
 
-            async fetchData(dateRange) {
+            async fetchData(payPeriodData) {
                 // 1. Dispatch loading event immediately
                 this.$dispatch('timesheet-data-loading');
                 this.isLoading = true;
@@ -62,7 +62,7 @@
                             'Content-Type': 'application/json',
                             'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
                         },
-                        body: JSON.stringify(dateRange)
+                        body: JSON.stringify(payPeriodData)
                     });
 
                     if (!response.ok) {
