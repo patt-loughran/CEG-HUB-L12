@@ -164,15 +164,15 @@
                 if (!week) return;
 
                 const payPeriod = this.payPeriodNavData[this.selectedPayPeriodIndex];
+                // Determine the week number based on the index (0 or 1)
+                const weekNum = this.selectedWeekIndex === 0 ? 'Week 1' : 'Week 2';
                 
                 this.$dispatch('timesheet-date-change', {
                     // Week-specific data
                     startDate: week.startDate,
                     endDate: week.endDate,
-                    weekLabel: week.weekLabel,
+                    weekNum: weekNum,
                     payPeriodLabel: payPeriod.payPeriodLabel,
-                    payPeriodStartDate: payPeriod.payPeriodStartDate,
-                    payPeriodEndDate: payPeriod.payPeriodEndDate
                 });
             },
         }

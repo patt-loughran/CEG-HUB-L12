@@ -49,13 +49,13 @@
             },
 
             async fetchData(payPeriodData) {
-                // 1. Dispatch loading event immediately
+                // 1. Dispatch loading event for immediate UI feedback
                 this.$dispatch('timesheet-data-loading');
                 this.isLoading = true;
                 this.error = null;
 
                 try {
-                    // 2. Send fetch request
+                    // 2. Send fetch request to the backend
                     const response = await fetch('/time/timesheet/data', {
                         method: 'POST',
                         headers: {
@@ -66,17 +66,23 @@
                     });
 
                     if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.error || `Server responded with status: ${response.status}`);
+                        // Handles network or server errors (e.g., 500, 404)
+                        throw new Error(`Server error: ${response.status} ${response.statusText}`);
                     }
 
                     const data = await response.json();
 
-                    // 3. Dispatch success event
+                    // 3. Check for application-level errors returned by the controller
+                    if (data.timesheetData && data.timesheetData.success === false) {
+                        throw new Error(data.timesheetData.errors || 'An unknown error occurred while fetching data.');
+                    }
+
+                    // 4. Dispatch the entire successful payload.
+                    // Listening components can now access `event.detail.timesheetData` or `event.detail.statsData`.
                     this.$dispatch('timesheet-data-updated', data);
 
                 } catch (e) {
-                    // 4. Dispatch error event
+                    // 5. Dispatch a single, consistent error event for all components
                     console.error("Timesheet fetch error:", e);
                     this.error = e.message;
                     this.$dispatch('timesheet-data-error', { message: this.error });

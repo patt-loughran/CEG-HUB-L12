@@ -146,8 +146,8 @@ class TimesheetController extends Controller
     public function getData(Request $request) {
         sleep(2);
         try {
-            [$user, $startDate, $endDate] = $this->validateRequest($request);
-            $timesheetData = $this->getTimesheetData($user, $startDate, $endDate, $request);
+            [$user, $startDate, $endDate, $weekNum, $formattedPayPeriod] = $this->validateRequest($request);
+            $timesheetData = $this->getTimesheetData($user, $startDate, $endDate, $weekNum, $formattedPayPeriod, $request);
             $statsData = $this->getStatsData($user, $request);
 
             return response()->json([ 
@@ -170,10 +170,8 @@ class TimesheetController extends Controller
              $validatedData = $request->validate([
                 'startDate'          => 'required|date_format:Y-m-d',
                 'endDate'            => 'required|date_format:Y-m-d',
-                'weekLabel'          => 'required|string',
-                'payPeriodLabel'     => 'required|string',
-                'payPeriodStartDate' => 'required|date_format:Y-m-d',
-                'payPeriodEndDate'   => 'required|date_format:Y-m-d',
+                'weekNum'            => 'required|string',
+                'payPeriodLabel'     => 'required|string'
             ]);
 
             $user = Auth::user();
@@ -181,16 +179,16 @@ class TimesheetController extends Controller
             $startDate = Carbon::parse($validatedData['startDate'])->startOfDay();
             $endDate = Carbon::parse($validatedData['endDate'])->endOfDay();
 
-            return [$user, $startDate, $endDate];
+            return [$user, $startDate, $endDate, $validatedData['weekNum'], $validatedData['payPeriodLabel']];
         }
         catch (Exception $e) {
              ErrorLogger::logAndRethrow($e, 'Request validation failed in validateRequest method in TimesheetController', $request,[]);
         }
     }
-    private function getTimesheetData($user, $startDate, $endDate, $request) {
+    private function getTimesheetData($user, $startDate, $endDate, $weekNum, $formattedPayPeriod, $request) {
         try {
             $rawTimesheetData = $this->getRawTimesheetData($user, $startDate, $endDate);
-            $formattedTimesheetData = $this->processTimesheetData($user, $startDate, $endDate, $rawTimesheetData);
+            $formattedTimesheetData = $this->processTimesheetData($user, $startDate, $endDate, $rawTimesheetData, $weekNum, $formattedPayPeriod);
 
             return ["success" => true, "data" => $formattedTimesheetData, "errors" => null];
         }
@@ -200,7 +198,7 @@ class TimesheetController extends Controller
         }
     }
 
-    private function getRawTimesheetData($startDate, $endDate, $user) {
+    private function getRawTimesheetData($user, $startDate, $endDate) {
         // Fetch raw hour entries for the user and week
         $pipeline = [
             // Stage 1: Match the initial documents (same as before)
@@ -272,7 +270,7 @@ class TimesheetController extends Controller
         return $rawTimesheetData;
     }
 
-    private function processTimesheetData($user, $startDate, $endDate, $hourEntries) {   
+    private function processTimesheetData($user, $startDate, $endDate, $hourEntries, $weekNum, $formattedPayPeriod) {   
         $dateHeaders = [];
         $dateMap = [];
         $period = \Carbon\CarbonPeriod::create($startDate, $endDate);
@@ -318,13 +316,21 @@ class TimesheetController extends Controller
                 'rowTotal' => $rowTotal,
             ];
         }
+
+        $formattedData = [
+            'headerInfo' => [
+                'weekNum'      => $weekNum,
+                'payPeriodLabel' => 'of Pay Period (' . $formattedPayPeriod . ')',
+            ],
+            'dateHeaders'    => $dateHeaders,
+            'timesheetRows'  => $timesheetRows
+        ];
         
-        return $timesheetRows;
+        return $formattedData;
     }
 
     private function getStatsData($user, $request) {
         try {
-        // non-critical data
         $today = Carbon::today();
         $payPeriodsDoc = GlobalDoc::where('name', 'Pay-Periods')->firstOrFail();
         $surroundingPayPeriods = $this->getSurroundingPayPeriods($payPeriodsDoc, $today);
@@ -342,9 +348,11 @@ class TimesheetController extends Controller
         }
         catch (Exception $e) {
             ErrorLogger::logAndRethrow($e, 'Error in getting data for stat tiles for timesheet', $request,[]);
-            return ['prevPayPeriodStatus'   => "success" => false, "data" => null, "errors" => $e->getMessage(),
-                    'daysLeftInPayPeriod'   => "success" => false, "data" => null, "errors" => $e->getMessage(),
-                    'currentPayPeriodHours' => "success" => false, "data" => null, "errors" => $e->getMessage()];
+           return [
+                'prevPayPeriodStatus'   => ["success" => false, "data" => null, "errors" => $e->getMessage()],
+                'daysLeftInPayPeriod'   => ["success" => false, "data" => null, "errors" => $e->getMessage()],
+                'currentPayPeriodHours' => ["success" => false, "data" => null, "errors" => $e->getMessage()]
+            ];
         }
     }
 
@@ -359,7 +367,7 @@ class TimesheetController extends Controller
                 "errors"  => null
             ];
         } catch (Exception $e) {
-            ErrorLogger::logAndRethrow($e,'Failed to get previous pay-period status ';
+            ErrorLogger::logAndRethrow($e,'Failed to get previous pay-period status ');
             return [
                 'success' => false,
                 'data'    => null,

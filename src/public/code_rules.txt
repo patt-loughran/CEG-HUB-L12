@@ -26,16 +26,12 @@ General:
 
             Blade Components:
                 - Blade components handle all user interactions and state changes using Alpine.JS. We do NOT use LiveWire. The components can be of three classes: User Input (visual), Data Bridge (headless), and Display (visual). Note, this is for all non-custom pages.
-                - User Input and Display components can either be critical or non-critical.
-                    - if the controller runs into an error fetching data for a critical component, the controller will return a seperate error view and not attempt to load the page.
-                    - if the controller runs into an error fetching data for a non-critical component, it will pass an error message back to the primary view so that the component can display an error, but the rest of the page can still be used.
 
                     User Input Components: These components contain HTML elements for user input, e.g. <input> or <select>. They may also contain custom input components found at src/resources/views/components/inputs
-                    - Modifying these inputs may result in a custom event being dispatched to the data bridge, indicating we need to fetch new data for the display components.
+                    - Modifying these inputs and/or hitting a "submit" button will result in a custom event being dispatched to the data bridge, indicating we need to fetch new data for the display components.
                     - There are two main layouts for a User Input component. Either custom events are triggered on change of the input elements and are sent as soon as a change is made, or there is a "submit" button that sends the state of the neccessary input elements.
                     - Usually there is just one User Input Component, but there can be mutliple depending on the page.
-                    - Almost always a critical component.
-                    - Sometimes, a User Input Component can be a child of a display component.
+                    - Sometimes, a User Input Component can be a child of a display component. When this is the case we will still define the user input component in its own file and will use a slot for the user input component within the display component.
 
                     Data-Bridge Component: A "headless" (non-visual) Blade component listens for custom events from the User Input Component.
                         - The Data-Bridge component is the single source of truth for the state of an asynchronous data request. It is responsible for telling dynamic display components not only when data has arrived or an error has occurred, but also when a request has started.
@@ -55,8 +51,7 @@ General:
                         - dynamic display components change as data is loaded from the data-bridge. They are NEVER pre-loaded on initial load. We always get the data from the data bridge. Initial load data is triggered by a manual firing of a user input event.
 
                         general display component rules:
-                            - Non Critical Display Components MUST have a visual state for each of these three conditions: a loading state (e.g., skeleton), a data-display state, and an error state.
-                            - Critical display components do not need a loading state and a data-display state, but not an error-state.
+                            - Display Components MUST have a visual state for each of these three conditions: a loading state (e.g., skeleton), a data-display state, and an error state.
                             - The init() method of a display component SHOULD set isLoading to true to handle the initial page load, ensuring a loading skeleton is shown while the very first fetch is in progress.
 
                         static display component rules:
