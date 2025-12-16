@@ -20,7 +20,7 @@
             format="number"
             iconClasses="bg-purple-100 text-purple-700"
             iconName="pastClock"
-            eventPrefix="timesheet-data"
+            eventPrefix="stats-data"
         />
         
         <x-general.simple-stat 
@@ -29,7 +29,7 @@
             format="number"
             iconClasses="bg-blue-100 text-blue-700"
             iconName="calendar"
-            eventPrefix="timesheet-data"
+            eventPrefix="stats-data"
         />
 
         <x-general.simple-stat 
@@ -38,7 +38,7 @@
             format="hours"
             iconClasses="bg-green-100 text-green-700"
             iconName="simpleClock"
-            eventPrefix="timesheet-data"
+            eventPrefix="stats-data"
         />
 
     </div>
@@ -54,6 +54,9 @@
 
     {{-- This component is headless and handles all data fetching for the page (No changes here) --}}
     <x-time.data-bridge />
+
+    {{-- Add the error modal component here --}}
+    <x-general.error-modal />
 
 @stack('scripts')
 </body>

@@ -27,7 +27,7 @@
             <!-- Scrollable List -->
             <div class="flex-1 overflow-y-auto -mx-2">
                 <ul class="px-2">
-                    <template x-for="employeeHoursData in getSortedEmployeeHoursData()" x-bind:key="employeeHoursData.employee_id">
+                    <template x-for="employeeHoursData in getSortedEmployeeHoursData()" x-bind:key="employeeHoursData.id">
                         <li class="flex items-center justify-between py-2.5 px-2 rounded-md hover:bg-slate-50">
                             <div class="flex items-center gap-3">
                                 <div class="flex-shrink-0 h-8 w-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-600" x-text="help_generate_initials(employeeHoursData.employee_name)"></div>

@@ -20,7 +20,7 @@
     <!-- Timesheet Table Wrapper -->
     <div class="overflow-x-auto rounded-lg border border-slate-200 flex-grow">
         <table class="min-w-full border-collapse text-sm">
-            <thead class="bg-slate-700 text-white sticky top-0">
+            <thead class="bg-slate-700 text-white sticky top-0 z-10">
                 <tr class="divide-x divide-slate-600">
                     <th class="w-10 p-2 text-center">
                         <button @click="pinAll()" title="Pin All Rows" class="p-2 rounded-lg hover:bg-slate-500">
@@ -81,18 +81,30 @@
                                 <x-general.icon name="trash" class="w-4 h-4" />
                             </button>
                         </td>
-                        <td class="p-0 align-middle"><input type="text" x-model="row.project_code" class="h-full w-full border-0 bg-transparent px-3 py-2 text-slate-900 focus:ring-2 focus:ring-slate-400 focus:outline-none focus:ring-inset" /></td>
-                        <td class="p-0 align-middle"><input type="text" x-model="row.sub_project" class="h-full w-full border-0 bg-transparent px-3 py-2 text-slate-900 focus:ring-2 focus:ring-slate-400 focus:outline-none focus:ring-inset" /></td>
-                        <td class="p-0 align-middle"><input type="text" x-model="row.activity_code" class="h-full w-full border-0 bg-transparent px-3 py-2 text-slate-900 focus:ring-2 focus:ring-slate-400 focus:outline-none focus:ring-inset" /></td>
+                       <td class="p-0 align-middle">
+                            <x-time.double-search-dropdown cellType="'project_code'" placeholder="Project Code" accessor="row.project_code"/>
+                        </td>
+                        <td class="p-0 align-middle">
+                            <x-time.dropdown cellType="'sub_project'" placeholder="Sub-Code"  accessor="row.sub_project"/>
+                        </td>
+                        <td class="p-0 align-middle">
+                            <x-time.dropdown cellType="'activity_code'" placeholder="Activity Code" accessor="row.activity_code"/>
+                        </td>
                          <template x-for="(hour, hourIndex) in row.hours" x-bind:key="hourIndex">
                             <td class="p-0 align-middle hover:cursor-cell" x-bind:class="{ 'bg-slate-50/75': hour.isWeekend }">
                                 <input type="text"
                                     x-model.lazy="hour.value"
+                                    x-bind:id="`cell-${rowIndex}-${hourIndex}`"
+                                    @keydown="handleHourKeydown($event, rowIndex, hourIndex)"
                                     @change="validateHourInput(rowIndex, hourIndex)"
                                     @click="onCellFocus($event)"
                                     @dblclick.prevent="onCellEdit($event)"
                                     @blur="onCellBlur($event)"
-                                    class="h-full w-full border-0 bg-transparent px-1 py-2 text-center text-slate-800 hover:cursor-cell"/>
+                                    class="h-full w-full border-0 bg-transparent px-1 py-2 text-center hover:cursor-cell"
+                                    x-bind:class="{
+                                        'text-slate-950': hour.value != 0,
+                                        'text-slate-400': hour.value == 0
+                                    }"/>
                             </td>
                        </template>  
                         <td class="p-0 align-middle"><div class="bg-slate-100 px-3 py-2 text-right font-semibold text-slate-800" x-text="calculateRowTotal(rowIndex)"></div></td>
@@ -100,7 +112,7 @@
                 </template>
             </template>
             </tbody>
-            <tfoot class="bg-slate-100 sticky bottom-0">
+            <tfoot class="bg-slate-100 sticky bottom-0 z-10">
                 <tr class="divide-x divide-slate-200">
                     <th colspan="5" scope="row" class="px-3 py-2 text-right text-sm font-bold text-slate-600">Daily Totals</th>
                     <template x-for="total in footerTotals.dailyTotals">
@@ -124,7 +136,7 @@
                     <span>More</span>
                     <svg class="h-4 w-4 text-slate-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
                 </button>
-                <div x-show="showActionsMenu" @click.away="showActionsMenu = false" x-transition class="absolute bottom-full z-10 mb-2 w-max min-w-full rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5" style="display: none;">
+                <div x-show="showActionsMenu" @click.away="showActionsMenu = false" x-transition class="absolute bottom-full z-100 mb-2 w-max min-w-full rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5" style="display: none;">
                     <button @click="revertChanges(); showActionsMenu = false;" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">Revert Changes</button>
                     <button @click="loadFromLastWeek(); showActionsMenu = false;" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">Load from last week</button>
                 </div>
@@ -135,7 +147,7 @@
                 <span class="text-sm font-medium text-slate-600">Pay Period Hours:</span>
                 <span class="block text-lg font-semibold text-slate-800" x-text="payPeriodTotal.toFixed(1)"></span>
             </div>
-            <button class="rounded-md bg-slate-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">Save Timesheet</button>
+            <button @click="saveTimesheet()" class="rounded-md bg-slate-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">Save Timesheet</button>
         </div>
     </div>
 </div>
@@ -153,6 +165,7 @@
             payPeriodTotal: null,
             persistedPayPeriodHours: null, 
             initialWeeklyTotal: null,
+            dropdownData: null,
 
             // State management
             isLoading: null,
@@ -171,13 +184,28 @@
                 this.payPeriodTotal = 0;
                 this.persistedPayPeriodHours = 0;
                 this.initialWeeklyTotal = 0;
+                this.dropdownData = {};
                 this.isLoading = true;
                 this.error = null;
                 this.hasUnsavedChanges = false;
                 this.isEditingCell = false;
                 
-                this.$watch('timesheetRows', () => {
-                    if (!this.isLoading) {
+                this.$watch('timesheetRows', (newRows, oldRows) => {
+                    if (this.isLoading || !oldRows || newRows.length !== oldRows.length) return;
+
+                    newRows.forEach((newRow, index) => {
+                        const oldRow = oldRows[index];
+                        if (newRow.project_code !== oldRow.project_code) {
+                            this.timesheetRows[index].sub_project = '';
+                            this.timesheetRows[index].activity_code = '';
+                        }
+                        if (newRow.sub_project !== oldRow.sub_project) {
+                            this.timesheetRows[index].activity_code = '';
+                        }
+                    });
+
+                    // Standard unsaved changes check
+                     if (!this.isLoading) {
                         this.hasUnsavedChanges = JSON.stringify(this.timesheetRows) !== JSON.stringify(this.pristineTimesheetRows);
                     }
                 }, { deep: true });
@@ -228,6 +256,12 @@
                 this.recalculateAllTotals();
             },
 
+            getCellValue(rowIndex, columnIndex) {
+                if (columnIndex === 3) {
+                    return this.timesheetRows[rowIndex]["sub_project"];
+                }
+            },
+
             // === ROW MANAGEMENT METHODS ===
             addNewRow() {
                 const newHours = this.dateHeaders.map(header => ({ value: 0, isWeekend: header.isWeekend }));
@@ -243,6 +277,10 @@
             },
 
             removeRow(rowIndex) {
+                if (this.timesheetRows[rowIndex].is_pinned) {
+                    alert("You cannot delete a pinned row.");
+                    return;
+                }
                 this.timesheetRows.splice(rowIndex, 1);
                 this.recalculateAllTotals();
             },
@@ -261,7 +299,9 @@
             },
 
             onCellFocus(event) {
-                event.target.select();
+                if (!this.isEditingCell) {
+                    event.target.select();
+                }
             },
             onCellEdit(event) {
                 // The input element that was double-clicked
@@ -301,6 +341,62 @@
                 this.isEditingCell = false;
             },
 
+            handleHourKeydown(event, rowIndex, hourIndex) {
+                let nextRowIndex = rowIndex;
+                let nextHourIndex = hourIndex;
+
+                switch (event.key) {
+                    case 'ArrowUp':
+                        event.preventDefault();
+                        nextRowIndex = rowIndex > 0 ? rowIndex - 1 : this.timesheetRows.length - 1;
+                        break;
+                    case 'ArrowDown':
+                        event.preventDefault();
+                        nextRowIndex = rowIndex < this.timesheetRows.length - 1 ? rowIndex + 1 : 0;
+                        break;
+                    case 'ArrowLeft':
+                        event.preventDefault();
+                        nextHourIndex = hourIndex > 0 ? hourIndex - 1 : this.dateHeaders.length - 1;
+                        break;
+                    case 'ArrowRight':
+                        event.preventDefault();
+                        nextHourIndex = hourIndex < this.dateHeaders.length - 1 ? hourIndex + 1 : 0;
+                        break;
+                    case 'Enter':
+                        event.preventDefault();
+                        if (hourIndex < this.dateHeaders.length - 1) {
+                            // Move to the next cell in the same row
+                            nextHourIndex = hourIndex + 1;
+                        } else if (rowIndex < this.timesheetRows.length - 1) {
+                            // Move to the first cell of the next row
+                            nextHourIndex = 0;
+                            nextRowIndex = rowIndex + 1;
+                        }
+                        break;
+                    default:
+                        // Allow other keys to function as normal
+                        return;
+                }
+                
+                const nextCellId = `cell-${nextRowIndex}-${nextHourIndex}`;
+                console.log(nextCellId);
+                this.$nextTick(() => {
+                    const nextCell = document.getElementById(nextCellId);
+                    if (nextCell) {
+                        nextCell.focus();
+                        nextCell.select();
+                    }
+                });
+            },
+
+            // === SAVE TIMESHEET ===
+            dispatchSaveEvent() {
+                this.$dispatch('save-timesheet', {
+                  timesheetRows: this.timesheetRows,
+                  headerInfo: this.headerInfo
+                });
+            },
+
             // === EVENT HANDLERS ===
             handleDataLoading() {
                 this.isLoading = true;
@@ -311,25 +407,18 @@
                 this.hasUnsavedChanges = false;
             },
 
-            handleDataUpdate(response) {
-                const timesheetPayload = response.timesheetData;
-                if (!timesheetPayload || !timesheetPayload.success) {
-                    this.handleInputError({ message: timesheetPayload.errors || 'Failed to parse timesheet data.' });
+            handleDataUpdate(timesheetData) {
+                if (!timesheetData || !timesheetData.success) {
+                    this.handleInputError({ message: timesheetData.errors || 'Failed to parse timesheet data.' });
                     return;
                 }
 
-                const data = timesheetPayload.data;
+                const data = timesheetData.data;
                 this.headerInfo = data.headerInfo;
                 this.dateHeaders = data.dateHeaders;
                 this.timesheetRows = data.timesheetRows;
-                
-                // Set the baseline pay period total from the stats data
-                const statsPayload = response.statsData;
-                if (statsPayload && statsPayload.currentPayPeriodHours && statsPayload.currentPayPeriodHours.success) {
-                    this.persistedPayPeriodHours = statsPayload.currentPayPeriodHours.data || 0;
-                } else {
-                    this.persistedPayPeriodHours = 0;
-                }
+                this.dropdownData = data.dropdownData;
+                console.log('[Parent Component] Dropdown data received from server:', JSON.parse(JSON.stringify(this.dropdownData)));
 
                 // Perform initial calculation for the newly loaded week
                 this.recalculateAllTotals();
@@ -337,18 +426,22 @@
                 // Store the initial weekly total to calculate the delta on user input
                 this.initialWeeklyTotal = this.footerTotals.weeklyTotal;
                 
-                // Display the authoritative total from the DB on initial load
-                this.payPeriodTotal = this.persistedPayPeriodHours;
-                
+               // Store the authoritative pay period total from the DB. This is our baseline.
+                this.persistedPayPeriodHours = data.payPeriodTotal;
+
+                // Display this authoritative total on initial load of the new week's data.
+                this.payPeriodTotal = data.payPeriodTotal;
+
                 this.pristineTimesheetRows = JSON.parse(JSON.stringify(data.timesheetRows));
                 this.hasUnsavedChanges = false;
                 this.isLoading = false;
+                this.error = null;
             },
 
             handleDataError(detail) {
                 this.error = detail.message;
                 this.isLoading = false;
-                alert(`Error fetching timesheet data: ${this.error}`);
+                this.$dispatch('error-modal', { message: this.error });
             }
         }
     }

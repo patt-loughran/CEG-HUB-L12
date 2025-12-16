@@ -20,7 +20,7 @@
             
             <div x-show="showWeekSelector" 
                  @click.away="showWeekSelector = false" 
-                 class="absolute z-10 mt-1 w-full rounded-md bg-white shadow-lg border border-slate-300 h-96 overflow-y-auto">
+                 class="absolute z-100 mt-1 w-full rounded-md bg-white shadow-lg border border-slate-300 h-96 overflow-y-auto">
                 
                 <!-- Loop through each Pay Period -->
                 <template x-for="(period, periodIndex) in payPeriodNavData" :key="periodIndex">
@@ -166,6 +166,8 @@
                 const payPeriod = this.payPeriodNavData[this.selectedPayPeriodIndex];
                 // Determine the week number based on the index (0 or 1)
                 const weekNum = this.selectedWeekIndex === 0 ? 'Week 1' : 'Week 2';
+                const payPeriodStartDate = payPeriod.weeks[0].startDate;
+                const payPeriodEndDate = payPeriod.weeks[1].endDate;
                 
                 this.$dispatch('timesheet-date-change', {
                     // Week-specific data
@@ -173,6 +175,8 @@
                     endDate: week.endDate,
                     weekNum: weekNum,
                     payPeriodLabel: payPeriod.payPeriodLabel,
+                    payPeriodStartDate: payPeriodStartDate,
+                    payPeriodEndDate: payPeriodEndDate,
                 });
             },
         }

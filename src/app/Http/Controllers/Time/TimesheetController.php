@@ -9,6 +9,9 @@ use Illuminate\Support\Facades\Log;
 use App\Models\Hour;
 use App\Models\GlobalDoc;
 use App\Models\User;
+use App\Models\Project;
+use App\Models\SubProject;
+use App\Models\PinnedProject;
 use Carbon\Carbon;
 use Exception;
 use App\Helpers\ErrorLogger;
@@ -37,7 +40,8 @@ class TimesheetController extends Controller
 
         } catch (Exception $e) {
             Log::error('TimesheetController error in index(): ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
-            return view('errors.500', ['message' => 'Could not load timesheet data. Please try again later.']);
+            return view('errors.500', ['user_message' => 'Could not load timesheet data. Please try again later.',
+                                       'dev_message'  => $e->getMessage()]);
         }
 
         return view('time.timesheet', [
@@ -144,10 +148,9 @@ class TimesheetController extends Controller
      * @return \Illuminate\Http\JsonResponse
      */
     public function getData(Request $request) {
-        sleep(2);
         try {
-            [$user, $startDate, $endDate, $weekNum, $formattedPayPeriod] = $this->validateRequest($request);
-            $timesheetData = $this->getTimesheetData($user, $startDate, $endDate, $weekNum, $formattedPayPeriod, $request);
+            [$user, $startDate, $endDate, $weekNum, $formattedPayPeriod, $payPeriodStartDate, $payPeriodEndDate] = $this->validateRequest($request);
+            $timesheetData = $this->getTimesheetData($user, $startDate, $endDate, $weekNum, $formattedPayPeriod, $payPeriodStartDate, $payPeriodEndDate, $request);
             $statsData = $this->getStatsData($user, $request);
 
             return response()->json([ 
@@ -156,8 +159,8 @@ class TimesheetController extends Controller
             ]); 
         }
         catch (Exception $e) {
-            ErrorLogger::logOnly($e, 'Error in GetData() in Timesheet Controller', $request,[]);
-            return view('errors.500', ['message' => 'Could not load timesheet data. Please try again later.']);
+            return view('errors.500', ['user_message' => 'Could not load timesheet data. Please try again later.',
+                                       'dev_message'  => $e->getMessage()]);
         }
     }
     
@@ -171,30 +174,56 @@ class TimesheetController extends Controller
                 'startDate'          => 'required|date_format:Y-m-d',
                 'endDate'            => 'required|date_format:Y-m-d',
                 'weekNum'            => 'required|string',
-                'payPeriodLabel'     => 'required|string'
+                'payPeriodLabel'     => 'required|string',
+                'payPeriodStartDate' => 'required|date_format:Y-m-d',
+                'payPeriodEndDate'   => 'required|date_format:Y-m-d'
+
             ]);
 
             $user = Auth::user();
             $user = User::where('email', 'ploughran@ceg-engineers.com')->first();
             $startDate = Carbon::parse($validatedData['startDate'])->startOfDay();
             $endDate = Carbon::parse($validatedData['endDate'])->endOfDay();
+            $ppStartDate = Carbon::parse($validatedData['payPeriodStartDate'])->startOfDay();
+            $ppEndDate = Carbon::parse($validatedData['payPeriodEndDate'])->endOfDay();
 
-            return [$user, $startDate, $endDate, $validatedData['weekNum'], $validatedData['payPeriodLabel']];
+            return [$user, $startDate, $endDate, $validatedData['weekNum'], $validatedData['payPeriodLabel'], $ppStartDate, $ppEndDate];
         }
         catch (Exception $e) {
              ErrorLogger::logAndRethrow($e, 'Request validation failed in validateRequest method in TimesheetController', $request,[]);
         }
     }
-    private function getTimesheetData($user, $startDate, $endDate, $weekNum, $formattedPayPeriod, $request) {
+    private function getTimesheetData($user, $startDate, $endDate, $weekNum, $formattedPayPeriod, $payPeriodStartDate, $payPeriodEndDate, $request) {
         try {
+            // 1. Get raw timesheet data as before
             $rawTimesheetData = $this->getRawTimesheetData($user, $startDate, $endDate);
-            $formattedTimesheetData = $this->processTimesheetData($user, $startDate, $endDate, $rawTimesheetData, $weekNum, $formattedPayPeriod);
+
+            // 2. Get all pinned projects for the user
+            $pinnedProjects = $this->getPinnedProjects($user);
+
+            // 3. Merge pinned projects that have no hours
+            $mergedTimesheetData = $this->mergePinnedProjects($rawTimesheetData, $pinnedProjects);
+
+            // 4. get Project/Sub/Activity Code dropdown options
+            $dropdownData = $this->getDropdownData();
+
+            // 5. format data
+            $formattedTimesheetData = $this->processTimesheetData(
+                $user, 
+                $startDate, 
+                $endDate, 
+                $mergedTimesheetData, // Use the merged data
+                $weekNum, 
+                $formattedPayPeriod, 
+                $payPeriodStartDate, 
+                $payPeriodEndDate,
+                $dropdownData
+            );
 
             return ["success" => true, "data" => $formattedTimesheetData, "errors" => null];
         }
         catch (Exception $e) {
             ErrorLogger::logAndRethrow($e, 'Error in getting data for timesheet in TimesheetController in getData()', $request,[]);
-            return ["success" => false, "data" => null, "errors" => $e->getMessage()];
         }
     }
 
@@ -270,7 +299,41 @@ class TimesheetController extends Controller
         return $rawTimesheetData;
     }
 
-    private function processTimesheetData($user, $startDate, $endDate, $hourEntries, $weekNum, $formattedPayPeriod) {   
+    private function getPinnedProjects($user) {
+    // Assuming you have a PinnedProject model. Adjust if using DB facade.
+    return PinnedProject::where('user_email', $user->email)
+        ->get(['project_code', 'sub_project', 'activity_code'])
+        ->map(function ($item) {
+            // Create a unique key for easy comparison
+            $item->key = $item->project_code . '|' . $item->sub_project . '|' . $item->activity_code;
+            return $item;
+        });
+    }
+
+    private function mergePinnedProjects($rawTimesheetData, $pinnedProjects) {
+        // Create a set of keys for existing timesheet entries for quick lookup
+        $existingEntries = collect($rawTimesheetData)->mapWithKeys(function ($entry) {
+            $key = $entry['project_code'] . '|' . $entry['sub_project'] . '|' . $entry['activity_code'];
+            return [$key => true];
+        });
+
+        // Iterate through pinned projects and add them if they don't exist in the timesheet data
+        foreach ($pinnedProjects as $pinnedProject) {
+            if (!isset($existingEntries[$pinnedProject->key])) {
+                $rawTimesheetData[] = [
+                    'project_code' => $pinnedProject->project_code,
+                    'sub_project' => $pinnedProject->sub_project,
+                    'activity_code' => $pinnedProject->activity_code,
+                    'is_pinned' => true,
+                    'daily_hours' => [], // No hours for this period
+                ];
+            }
+        }
+
+        return $rawTimesheetData;
+    }
+
+    private function processTimesheetData($user, $startDate, $endDate, $hourEntries, $weekNum, $formattedPayPeriod, $payPeriodStartDate, $payPeriodEndDate, $dropdownData) {   
         $dateHeaders = [];
         $dateMap = [];
         $period = \Carbon\CarbonPeriod::create($startDate, $endDate);
@@ -316,6 +379,8 @@ class TimesheetController extends Controller
                 'rowTotal' => $rowTotal,
             ];
         }
+        // Sort the timesheet rows using the new function
+        $sortedTimesheetRows = $this->sortTimesheetRows($timesheetRows);
 
         $formattedData = [
             'headerInfo' => [
@@ -323,10 +388,103 @@ class TimesheetController extends Controller
                 'payPeriodLabel' => 'of Pay Period (' . $formattedPayPeriod . ')',
             ],
             'dateHeaders'    => $dateHeaders,
-            'timesheetRows'  => $timesheetRows
+            'timesheetRows'  => $sortedTimesheetRows,
+            'dropdownData'   => $dropdownData,
+            'payPeriodTotal' => $this->getTotalHoursForPeriod($user, $payPeriodStartDate, $payPeriodEndDate)
         ];
         
         return $formattedData;
+    }
+
+    private function sortTimesheetRows($timesheetRows) {
+        usort($timesheetRows, function ($a, $b) {
+            // 1. Primary Sort: Pinned projects first (descending order)
+            $pinnedComparison = $b['is_pinned'] <=> $a['is_pinned'];
+            if ($pinnedComparison !== 0) {
+                return $pinnedComparison;
+            }
+
+            // 2. Secondary Sort: Project code alphabetically (ascending)
+            $projectCodeComparison = $a['project_code'] <=> $b['project_code'];
+            if ($projectCodeComparison !== 0) {
+                return $projectCodeComparison;
+            }
+
+            // 3. Tertiary Sort: Sub-project alphabetically (ascending)
+            $subProjectComparison = $a['sub_project'] <=> $b['sub_project'];
+            if ($subProjectComparison !== 0) {
+                return $subProjectComparison;
+            }
+
+            // 4. Quaternary Sort: Activity code alphabetically (ascending)
+            return $a['activity_code'] <=> $b['activity_code'];
+        });
+
+        return $timesheetRows;
+    }
+/**
+ * Retrieves hierarchical dropdown data for projects, sub-projects, and activity codes.
+ *
+ * @return array Nested associative array structured as:
+ * [
+ *     'PROJ001' => [
+ *         'project_name' => 'Project Alpha',
+ *         'sub_projects' => [
+ *             'Phase 1' => ['ACT001', 'ACT002', 'ACT003'],
+ *             'Phase 2' => ['ACT004', 'ACT005']
+ *         ]
+ *     ],
+ *     'PROJ002' => [
+ *         'project_name' => 'Project Beta',
+ *         'sub_projects' => [
+ *             'Design' => ['ACT010'],
+ *             'Development' => ['ACT011', 'ACT012']
+ *         ]
+ *     ]
+ * ]
+ */
+ private function getDropdownData() {
+    // 1. Fetch all projects from the database.
+    $projects = Project::all();
+    $dropdownData = [];
+    $projectCodes = $projects->pluck('projectcode')->unique()->all();
+    $subProjectNames = $projects->pluck('sub-projects')->flatten()->unique()->all();
+    $allSubProjects = SubProject::whereIn('projectcode', $projectCodes)
+                                ->whereIn('projectname', $subProjectNames)
+                                ->get()
+                                ->keyBy(function ($item) {
+                                    return $item['projectcode'] . '-' . $item['projectname'];
+                                });
+    // 4. We iterate through each project to build the final nested associative array.
+    foreach ($projects as $project) {
+        $projectCode = $project->projectcode;
+        $projectName = !empty($project->projectname) ? $project->projectname : "Name Unknown";
+       
+        $dropdownData[$projectCode]["sub_projects"] = [];
+        $dropdownData[$projectCode]["project_name"] = $projectName;
+        // Check if the project has any sub-projects listed.
+        if (!empty($project->{'sub-projects'})) {
+            foreach ($project->{'sub-projects'} as $subProjectName) {
+                $lookupKey = $projectCode . '-' . $subProjectName;
+                // Check if a corresponding sub-project was found in our earlier query.
+                if (isset($allSubProjects[$lookupKey])) {
+                    $subProject = $allSubProjects[$lookupKey];
+                   
+                    // Sort activity codes alphabetically
+                    $activityCodes = $subProject->activity_codes;
+                    sort($activityCodes);
+                    $dropdownData[$projectCode]["sub_projects"][$subProjectName] = $activityCodes;
+                }
+            }
+            // Sort sub-projects alphabetically
+            ksort($dropdownData[$projectCode]["sub_projects"]);
+        }
+    }
+    
+    // Sort projects alphabetically by project code
+    ksort($dropdownData);
+    
+    return $dropdownData;
     }
 
     private function getStatsData($user, $request) {
@@ -347,7 +505,7 @@ class TimesheetController extends Controller
         ];
         }
         catch (Exception $e) {
-            ErrorLogger::logAndRethrow($e, 'Error in getting data for stat tiles for timesheet', $request,[]);
+            ErrorLogger::logVerbose($e, 'Error in getting data for stat tiles for timesheet', $request,[]);
            return [
                 'prevPayPeriodStatus'   => ["success" => false, "data" => null, "errors" => $e->getMessage()],
                 'daysLeftInPayPeriod'   => ["success" => false, "data" => null, "errors" => $e->getMessage()],
@@ -367,7 +525,7 @@ class TimesheetController extends Controller
                 "errors"  => null
             ];
         } catch (Exception $e) {
-            ErrorLogger::logAndRethrow($e,'Failed to get previous pay-period status ');
+            ErrorLogger::logVerbose($e,'Failed to get previous pay-period status ');
             return [
                 'success' => false,
                 'data'    => null,
@@ -385,7 +543,7 @@ class TimesheetController extends Controller
                 "errors"  => null
             ];
         } catch (Exception $e) {
-            Log::warning('Failed to get days left in current pay-period ' . $e->getMessage());
+            ErrorLogger::logVerbose('Failed to get days left in current pay-period ' . $e->getMessage());
             return [
                 'success' => false,
                 'data'    => null,
@@ -424,5 +582,19 @@ class TimesheetController extends Controller
         })->toArray();
 
         return $result[0]['total_hours'] ?? 0;
+    }
+
+    // ===================================================================
+    // SAVETIMESHEET
+    // ===================================================================
+
+    /**
+     * Saves Timesheet from user request
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function saveTimesheet(Request $request) {
+
     }
 }

@@ -71,7 +71,7 @@ class ErrorLogger
      * @param Request|null $request
      * @param array $additionalData
      */
-    public static function logOnly(
+    public static function logVerbose(
         Exception $exception, 
         string $context = 'An error occurred', 
         ?Request $request = null, 

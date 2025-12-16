@@ -25,15 +25,27 @@
         },
         ... more rows
       ],
-      "footerTotals": {
-        "dailyTotals": [0.0, 9.5, 8.0, 10.5, 11.0, 7.5, 4.0],
-        "weeklyTotal": 50.5
+     "dropdownData": {
+        "PROJ001": {
+          "project_name": "Project Alpha",
+          "sub_projects": {
+            "Phase 1": ["ACT001", "ACT002", "ACT003"],
+            "Phase 2": ["ACT004", "ACT005"]
+          }
+        },
+        "PROJ002": {
+          "project_name": "Project Beta",
+          "sub_projects": {
+            "Design": ["ACT010"],
+            "Development": ["ACT011", "ACT012"]
+          }
+        }
       },
-      "payPeriodTotal": 90.5
     }
 --}}
 <div x-data="timeDataBridgeLogic()"
-     @timesheet-date-change.window="fetchData($event.detail)">
+     @timesheet-date-change.window="fetchData($event.detail)"
+     @save-timesheet.window="saveTimesheet($event.detail)">
 </div>
 
 @push('scripts')
@@ -79,7 +91,8 @@
 
                     // 4. Dispatch the entire successful payload.
                     // Listening components can now access `event.detail.timesheetData` or `event.detail.statsData`.
-                    this.$dispatch('timesheet-data-updated', data);
+                    this.$dispatch('timesheet-data-updated', data.timesheetData);
+                    this.$dispatch('stats-data-updated', data.statsData)
 
                 } catch (e) {
                     // 5. Dispatch a single, consistent error event for all components
@@ -89,7 +102,44 @@
                 } finally {
                     this.isLoading = false;
                 }
+            },
+
+            async saveTimesheet(Data) {
+              try {
+                // 2. Send fetch request to the backend
+                const response = await fetch('/time/timesheet/save', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                    },
+                    body: JSON.stringify(Data)
+                });
+
+                if (!response.ok) {
+                    // Handles network or server errors (e.g., 500, 404)
+                    throw new Error(`Server error: ${response.status} ${response.statusText}`);
+                }
+
+                const responseFromController = await response.json();
+
+                // 3. Check for application-level errors returned by the controller
+                if (ResponseFromController.success === false) {
+                    throw new Error(responseFromController.errors || 'An unknown error occurred while fetching data.');
+                }
+
+                // 4. Dispatch the entire successful payload.
+                // Listening components can now access `event.detail.timesheetData` or `event.detail.statsData`.
+                this.$dispatch('timesheet-data-saved');
+
+            } catch (e) {
+                // 5. Dispatch a single, consistent error event for all components
+                console.error("Timesheet save error:", e);
+                this.error = e.message;
+                this.$dispatch('timesheet-save-error', { message: this.error });
+            } finally {
             }
+          }
         }
     }
 </script>

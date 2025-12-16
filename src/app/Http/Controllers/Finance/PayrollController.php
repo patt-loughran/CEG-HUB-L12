@@ -86,7 +86,7 @@ class PayrollController extends Controller
         $validated = $request->validate([
         'year' => 'required|string',
         'dateRangeDropdown' => 'required|string',
-        'activeFilters' => 'required|array'
+        'activeFilters' => 'present|array'
         ]);
 
         $year = $validated['year'];
@@ -122,88 +122,91 @@ class PayrollController extends Controller
         $allSpecialCEGSubProjects = array_unique(array_merge(['PTO', 'Holiday'], $codes_200));
 
         $userMatchFilter = [];
+
+        // Handle 'active' filter
         if (in_array('active', $activeFilters)) {
-            // Correct Path: Point to 'userInfo.active'
-            $userMatchFilter['userInfo.active'] = true;
+            $userMatchFilter['active'] = true;
         }
 
-        if (in_array('hourly', $activeFilters)) {
-            // Correct Path: Point to 'userInfo.wage_type'
-            $userMatchFilter['userInfo.wage_type'] = 'hourly';
+        // Handle wage types (Hourly AND/OR Salaried)
+        $selectedWageTypes = [];
+        if (in_array('hourly', $activeFilters)) $selectedWageTypes[] = 'hourly';
+        if (in_array('salaried', $activeFilters)) $selectedWageTypes[] = 'salaried';
+
+        // If wage types are selected, use the $in operator to match ANY of them
+        if (!empty($selectedWageTypes)) {
+            $userMatchFilter['wage_type'] = ['$in' => $selectedWageTypes];
         }
-        if (in_array('salaried', $activeFilters)) {
-            // Correct Path: Point to 'userInfo.wage_type'
-            $userMatchFilter['userInfo.wage_type'] = 'salaried';
-        }
+
 
         $pipeline = [
-            // Stage 1: Match hours within the date range (Unchanged)
-            [
-                '$match' => [
-                    'date' => [
-                        '$gte' => new \MongoDB\BSON\UTCDateTime($startDate->getTimestamp() * 1000),
-                        '$lte' => new \MongoDB\BSON\UTCDateTime($endDate->getTimestamp() * 1000),
-                    ],
-                ],
-            ],
+            // Stage 1: Filter Users FIRST.
+            // This ensures we don't waste time looking up hours for inactive users.
+            // This replaces the hardcoded { active: true } from the raw pipeline.
+             (!empty($userMatchFilter)) ? ['$match' => $userMatchFilter] : null,
 
-            // Stage 2: [NEW] Pre-group by user email to reduce lookup operations
-            [
-                '$group' => [
-                    '_id' => '$user_email',
-                    // Store all related hour documents in an array for later processing
-                    'hours_entries' => ['$push' => '$$ROOT'],
-                ],
-            ],
-
-            // Stage 3: [NEW] Perform the lookup on the much smaller, grouped dataset
+            // Stage 2: The "Left Join" Lookup.
+            // We look into the 'hours' collection, filtering by date immediately inside the join.
             [
                 '$lookup' => [
-                    'from' => 'users',
-                    'localField' => '_id', // Join on the grouped user_email
-                    'foreignField' => 'email',
-                    'as' => 'userInfo', // Use a new name to avoid conflicts
+                    'from' => 'hours',
+                    'let' => ['user_email' => '$email'], // Pass the user's email to the sub-pipeline
+                    'pipeline' => [
+                        [
+                            '$match' => [
+                                '$expr' => [
+                                    '$eq' => ['$user_email', '$$user_email'] // Match email
+                                ],
+                                // Apply Date Filters here inside the lookup
+                                'date' => [
+                                    '$gte' => new \MongoDB\BSON\UTCDateTime($startDate->getTimestamp() * 1000),
+                                    '$lte' => new \MongoDB\BSON\UTCDateTime($endDate->getTimestamp() * 1000),
+                                ],
+                            ],
+                        ],
+                    ],
+                    'as' => 'hours_entries',
                 ],
             ],
 
-            // Stage 4: [NEW] Deconstruct the userInfo array
+            // Stage 3: Unwind the hours, BUT keep users with empty arrays.
+            // This is what allows "Zero Hour" employees to show up in the report.
             [
-                '$unwind' => '$userInfo',
+                '$unwind' => [
+                    'path' => '$hours_entries',
+                    'preserveNullAndEmptyArrays' => true,
+                ],
             ],
 
-            // Stage 5: [MOVED & MODIFIED] Apply user filters *after* the lookup
-            // IMPORTANT: Your filter logic must now reference the 'userInfo' object.
-            // e.g., 'user.active' becomes 'userInfo.active'
-            ($userMatchFilter) ? ['$match' => $userMatchFilter] : null,
-
-            // Stage 6: [NEW] Deconstruct the hours_entries array to process each entry
-            [
-                '$unwind' => '$hours_entries',
-            ],
-
-            // Stage 7: [MODIFIED] Final grouping for calculations. All field paths are updated.
+            // Stage 4: Grouping & Calculation
+            // Note: Field references are slightly different because we started on the User object.
+            // (e.g., '$employee_number' is now at the root, not inside 'userInfo')
             [
                 '$group' => [
                     '_id' => [
-                        'employee_id' => '$userInfo.employee_number', // Path updated
-                        'name' => '$userInfo.name',                   // Path updated
+                        'mongo_id' => '$_id', 
+                        'employee_id' => '$employee_number',
+                        'name' => '$name',
                     ],
-                    'expected_billable' => ['$first' => '$userInfo.expected_billable'], // Path updated
+                    'expected_billable' => ['$first' => '$expected_billable'],
+                    
+                    // PTO Calculation
                     'pto' => [
                         '$sum' => [
                             '$cond' => [
                                 'if' => [
                                     '$and' => [
-                                        // Paths updated to look inside 'hours_entries'
                                         ['$eq' => ['$hours_entries.project_code', 'CEG']],
                                         ['$eq' => ['$hours_entries.sub_project', 'PTO']],
                                     ],
                                 ],
-                                'then' => '$hours_entries.hours', // Path updated
+                                'then' => '$hours_entries.hours',
                                 'else' => 0,
                             ],
                         ],
                     ],
+
+                    // Holiday Calculation
                     'holiday' => [
                         '$sum' => [
                             '$cond' => [
@@ -213,11 +216,13 @@ class PayrollController extends Controller
                                         ['$eq' => ['$hours_entries.sub_project', 'Holiday']],
                                     ],
                                 ],
-                                'then' => '$hours_entries.hours', // Path updated
+                                'then' => '$hours_entries.hours',
                                 'else' => 0,
                             ],
                         ],
                     ],
+
+                    // Other 200 Calculation (Using your Laravel variable $codes_200)
                     'other_200' => [
                         '$sum' => [
                             '$cond' => [
@@ -229,11 +234,13 @@ class PayrollController extends Controller
                                         ['$ne' => ['$hours_entries.sub_project', 'Holiday']],
                                     ],
                                 ],
-                                'then' => '$hours_entries.hours', // Path updated
+                                'then' => '$hours_entries.hours',
                                 'else' => 0,
                             ],
                         ],
                     ],
+
+                    // Other Non-Billable Calculation (Using your Laravel variables)
                     'other_nb' => [
                         '$sum' => [
                             '$cond' => [
@@ -249,11 +256,13 @@ class PayrollController extends Controller
                                         ]]
                                     ]
                                 ],
-                                'then' => '$hours_entries.hours', // Path updated
+                                'then' => '$hours_entries.hours',
                                 'else' => 0,
                             ],
                         ],
                     ],
+
+                    // Billable Calculation (Using your Laravel variables)
                     'billable' => [
                         '$sum' => [
                             '$cond' => [
@@ -263,19 +272,22 @@ class PayrollController extends Controller
                                         ['$not' => ['$in' => ['$hours_entries.project_code', $internalProjectCodes]]],
                                     ],
                                 ],
-                                'then' => '$hours_entries.hours', // Path updated
+                                'then' => '$hours_entries.hours',
                                 'else' => 0,
                                     ],
                                 ],
                             ],
-                    'total_hours' => ['$sum' => '$hours_entries.hours'], // Path updated
+                    
+                    // Total Hours
+                    'total_hours' => ['$sum' => '$hours_entries.hours'],
                 ],
             ],
 
-            // Stage 8: Project the final structure (Unchanged)
+            // Stage 5: Projection (Math) - Unchanged
             [
                 '$project' => [
                     '_id' => 0,
+                    'id' => ['$toString' => '$_id.mongo_id'],
                     'employee_name' => '$_id.name',
                     'employee_id' => '$_id.employee_id',
                     'expected_billable' => '$expected_billable',
@@ -307,20 +319,23 @@ class PayrollController extends Controller
                 ],
             ],
 
-            // Stage 9: Sort the results by employee name (Unchanged)
+            // Stage 6: Sort - Unchanged
             [
                 '$sort' => [
                     'employee_name' => 1
                 ]
             ]
         ];
-                
-        // Remove null stage if no user filters are active
+
+        // Clean up the pipeline array (remove nulls if Stage 1 conditional failed, though I added a default)
         $pipeline = array_values(array_filter($pipeline));
 
-        $results = Hour::raw(function ($collection) use ($pipeline) {
+        // EXECUTION: IMPORTANT - Run this on the User model
+        $results = User::raw(function ($collection) use ($pipeline) {
             return $collection->aggregate($pipeline);
         })->toArray();
+
+        Log::debug($results);
 
        // Initialize totals
         $totalCompanyHours = 0;
@@ -348,8 +363,8 @@ class PayrollController extends Controller
         // Prepare the response
         $response = [
             'tableData' => $results,
-            'totalHours' => $totalCompanyHours, // Use the more descriptive variable name
-            'totalOvertime' => $totalCompanyOvertime, // Use the more descriptive variable name
+            'totalHours' => $totalCompanyHours,
+            'totalOvertime' => $totalCompanyOvertime,
             'averageBillablePercentage' => round($averageBillablePercentage, 2),
             'payPeriodIdentifier' => $validated['dateRangeDropdown']
         ];

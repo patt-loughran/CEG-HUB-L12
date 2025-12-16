@@ -111,7 +111,7 @@
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-200">
-                        <template x-for="row in sortedData()" :key="row.employee_id">
+                        <template x-for="row in sortedData()" :key="row.id">
                             <tr class="hover:bg-slate-50">
                                 <td class="py-4 px-4 whitespace-nowrap"><div class="flex items-center gap-3"><div x-bind:class="`hidden xl:flex flex-shrink-0 h-9 w-9 rounded-full items-center justify-center text-sm font-bold ${getAvatarColors(generateInitials(row.employee_name)).background} ${getAvatarColors(generateInitials(row.employee_name)).text}`"><span x-text="generateInitials(row.employee_name)"></span></div><div><div class="font-medium text-slate-900" x-text="row.employee_name"></div><div class="text-xs text-slate-500" x-text="`ID: ${row.employee_id}`"></div></div></div></td>
                                 <td class="py-4 px-4 whitespace-nowrap text-right"><span x-bind:class="row.pto == 0 ? 'text-slate-400' : 'text-slate-800'" x-text="row.pto.toFixed(1)"></span></td>
@@ -132,7 +132,7 @@
                 {{-- MOBILE: Card-based View --}}
                 <div class="lg:hidden">
                     <div class="divide-y divide-slate-200">
-                        <template x-for="row in sortedData()" :key="row.employee_id">
+                        <template x-for="row in sortedData()" :key="row.id">
                             <div class="p-4">
                                 {{-- Card Header --}}
                                 <div class="flex items-center justify-between">
