@@ -16,6 +16,7 @@
     @payroll-data-loading.window="handlePayrollFetchInitiated()"
     @payroll-data-updated.window="handlePayrollDataUpdate($event)"
     @payroll-data-error.window="handlePayrollError($event)"
+    @process-export.window="handleExport($event)"
     class="bg-white rounded-lg shadow-sm border border-slate-200 flex flex-col flex-1 min-h-[320px] max-w-full overflow-hidden">
       
     {{-- Component Header --}}
@@ -30,7 +31,7 @@
                 </p>
             </div>
             <template x-if="!isLoading && !error && tableData.length > 0">
-                <button class="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-200 text-slate-800 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-700 hover:text-white hover:border-slate-300 hover:cursor-pointer transition-all">
+                <button x-on:click="openExportModal()" class="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-200 text-slate-800 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-700 hover:text-white hover:border-slate-300 hover:cursor-pointer transition-all">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
                     Export
                 </button>
@@ -114,15 +115,15 @@
                         <template x-for="row in sortedData()" :key="row.id">
                             <tr class="hover:bg-slate-50">
                                 <td class="py-4 px-4 whitespace-nowrap"><div class="flex items-center gap-3"><div x-bind:class="`hidden xl:flex flex-shrink-0 h-9 w-9 rounded-full items-center justify-center text-sm font-bold ${getAvatarColors(generateInitials(row.employee_name)).background} ${getAvatarColors(generateInitials(row.employee_name)).text}`"><span x-text="generateInitials(row.employee_name)"></span></div><div><div class="font-medium text-slate-900" x-text="row.employee_name"></div><div class="text-xs text-slate-500" x-text="`ID: ${row.employee_id}`"></div></div></div></td>
-                                <td class="py-4 px-4 whitespace-nowrap text-right"><span x-bind:class="row.pto == 0 ? 'text-slate-400' : 'text-slate-800'" x-text="row.pto.toFixed(1)"></span></td>
-                                <td class="py-4 px-4 whitespace-nowrap text-right"><span x-bind:class="row.holiday == 0 ? 'text-slate-400' : 'text-slate-800'" x-text="row.holiday.toFixed(1)"></span></td>
-                                <td class="py-4 px-4 whitespace-nowrap text-right"><span x-bind:class="row.other_200 == 0 ? 'text-slate-400' : 'text-slate-800'" x-text="row.other_200.toFixed(1)"></span></td>
-                                <td class="py-4 px-4 whitespace-nowrap text-right"><span x-bind:class="row.other_nb == 0 ? 'text-slate-400' : 'text-slate-800'" x-text="row.other_nb.toFixed(1)"></span></td>
-                                <td class="py-4 px-4 whitespace-nowrap text-right font-medium"><span x-bind:class="row.total_nb == 0 ? 'text-slate-400' : 'text-slate-800'" x-text="row.total_nb.toFixed(1)"></span></td>
-                                <td class="py-4 px-4 whitespace-nowrap text-right font-medium"><span x-bind:class="row.billable == 0 ? 'text-slate-400' : 'text-slate-800'" x-text="row.billable.toFixed(1)"></span></td>
-                                <td class="py-4 px-4 text-slate-700 whitespace-nowrap"><div class="flex items-center justify-end gap-2"><span x-bind:class="row.billable_percentage == 0 ? 'text-slate-400' : 'text-slate-800'" x-text="`${row.billable_percentage.toFixed(0)}%`"></span><div class="hidden min-[1800px]:block w-20 h-1.5 bg-slate-200 rounded-full"><div class="bg-slate-400 h-1.5 rounded-full" x-bind:style="`width: ${row.billable_percentage}%`"></div></div></div></td>
-                                <td class="py-4 px-4 whitespace-nowrap text-center"><span x-bind:class="{'inline-flex items-center px-2.5 py-1 text-sm font-semibold rounded-full': true, 'text-green-800 bg-green-100': row.total_hours >= 80, 'text-amber-800 bg-amber-100': row.total_hours < 80}" x-text="row.total_hours.toFixed(1)"></span></td>
-                                <td class="py-4 px-4 whitespace-nowrap text-center"><template x-if="row.overtime > 0"><span class="inline-flex items-center px-2.5 py-1 text-sm font-semibold text-orange-800 bg-orange-100 rounded-full" x-text="row.overtime.toFixed(1)"></span></template><template x-if="row.overtime <= 0"><span class="text-slate-400">0.0</span></template></td>
+                                <td class="py-4 px-4 whitespace-nowrap text-right"><span x-bind:class="row.pto == 0 ? 'text-slate-300' : 'text-slate-900 '" x-text="row.pto.toFixed(2)"></span></td>
+                                <td class="py-4 px-4 whitespace-nowrap text-right"><span x-bind:class="row.holiday == 0 ? 'text-slate-300' : 'text-slate-900'" x-text="row.holiday.toFixed(2)"></span></td>
+                                <td class="py-4 px-4 whitespace-nowrap text-right"><span x-bind:class="row.other_200 == 0 ? 'text-slate-300' : 'text-slate-900'" x-text="row.other_200.toFixed(2)"></span></td>
+                                <td class="py-4 px-4 whitespace-nowrap text-right"><span x-bind:class="row.other_nb == 0 ? 'text-slate-300' : 'text-slate-900'" x-text="row.other_nb.toFixed(2)"></span></td>
+                                <td class="py-4 px-4 whitespace-nowrap text-right font-medium"><span x-bind:class="row.total_nb == 0 ? 'text-slate-300' : 'text-slate-900'" x-text="row.total_nb.toFixed(2)"></span></td>
+                                <td class="py-4 px-4 whitespace-nowrap text-right font-medium"><span x-bind:class="row.billable == 0 ? 'text-slate-300' : 'text-slate-900'" x-text="row.billable.toFixed(2)"></span></td>
+                                <td class="py-4 px-4 text-slate-700 whitespace-nowrap"><div class="flex items-center justify-end gap-2"><span x-bind:class="row.billable_percentage == 0 ? 'text-slate-300' : 'text-slate-900'" x-text="`${row.billable_percentage.toFixed(0)}%`"></span><div class="hidden min-[1800px]:block w-20 h-1.5 bg-slate-200 rounded-full"><div class="bg-slate-400 h-1.5 rounded-full" x-bind:style="`width: ${row.billable_percentage}%`"></div></div></div></td>
+                                <td class="py-4 px-4 whitespace-nowrap text-center"><span x-bind:class="{'inline-flex items-center px-2.5 py-1 text-md font-semibold rounded-full': true, 'text-green-800 bg-green-100': row.total_hours >= 80, 'text-amber-800 bg-amber-100': row.total_hours < 80}" x-text="row.total_hours.toFixed(2)"></span></td>
+                                <td class="py-4 px-4 whitespace-nowrap text-center"><template x-if="row.overtime > 0"><span class="inline-flex items-center px-2.5 py-1 text-md font-semibold text-orange-800 bg-orange-100 rounded-full" x-text="row.overtime.toFixed(2)"></span></template><template x-if="row.overtime <= 0"><span class="text-slate-400">0.0</span></template></td>
                                 <td class="py-4 px-4 text-right whitespace-nowrap"><button class="p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800 rounded-full"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" /></svg></button></td>
                             </tr>
                         </template>
@@ -239,6 +240,73 @@
                 this.error = event.detail;
                 this.tableData = [];
                 this.isLoading = false;
+            },
+            // --- Export Functionality ---
+            openExportModal() {
+                // Generate a default filename with date
+                const date = new Date().toISOString().slice(0, 10);
+                const defaultName = `payroll-export-${this.payPeriodIdentifier || date}`.replace(/\s+/g, '-').toLowerCase();
+                this.$dispatch('open-export-modal', { defaultName: defaultName });
+            },
+
+            handleExport(event) {
+                const fileName = event.detail.name || 'payroll-export';
+                this.exportToCSV(fileName);
+            },
+
+            exportToCSV(fileName) {
+                const data = this.sortedData();
+                if (!data || data.length === 0) return;
+
+                // Define CSV headers and corresponding data keys
+                const columns = [
+                    { header: 'Employee Name', key: 'employee_name' },
+                    { header: 'Employee ID', key: 'employee_id' },
+                    { header: 'PTO', key: 'pto' },
+                    { header: 'Holiday', key: 'holiday' },
+                    { header: 'Other 200', key: 'other_200' },
+                    { header: 'Other NB', key: 'other_nb' },
+                    { header: 'Total NB', key: 'total_nb' },
+                    { header: 'Billable', key: 'billable' },
+                    { header: 'Billable %', key: 'billable_percentage' },
+                    { header: 'Total Hours', key: 'total_hours' },
+                    { header: 'Overtime', key: 'overtime' }
+                ];
+
+                // Build CSV content
+                const headers = columns.map(col => col.header);
+                const rows = data.map(row => 
+                    columns.map(col => {
+                        let value = row[col.key];
+                        // Handle numeric formatting
+                        if (typeof value === 'number') {
+                            value = col.key === 'billable_percentage' ? value.toFixed(0) : value.toFixed(1);
+                        }
+                        // Escape values containing commas or quotes
+                        if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+                            value = `"${value.replace(/"/g, '""')}"`;
+                        }
+                        return value;
+                    })
+                );
+
+                const csvContent = [
+                    headers.join(','),
+                    ...rows.map(row => row.join(','))
+                ].join('\n');
+
+                // Create and trigger download
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                const url = URL.createObjectURL(blob);
+                
+                link.setAttribute('href', url);
+                link.setAttribute('download', `${fileName}.csv`);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
             }
         }
     }

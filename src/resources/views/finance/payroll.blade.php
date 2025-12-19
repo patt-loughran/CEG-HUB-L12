@@ -13,8 +13,8 @@
 
     {{-- LEFT COLUMN --}}
     <div class="flex flex-col gap-6 min-w-0 lg:min-h-0">
-        <x-finance.control-panel :dateRanges="$dateRanges" />
-        <x-finance.pay-period-quick-list />
+        <x-finance.payroll.control-panel :dateRanges="$dateRanges" />
+        <x-finance.payroll.pay-period-quick-list />
     </div>
 
     {{-- RIGHT COLUMN --}}
@@ -53,13 +53,16 @@
         </div>
 
         {{-- Payroll Table --}}
-        <x-finance.payroll-table />
+        <x-finance.payroll.payroll-table />
         
     </div>
 </div>
 
+{{-- Add this - the modal component --}}
+<x-general.export-table />
+
 {{-- This component is invisible but does all the work --}}
-<x-finance.data-bridge />
+<x-finance.payroll.data-bridge />
 
 </body>
 @stack('scripts')

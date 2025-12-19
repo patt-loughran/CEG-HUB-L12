@@ -1,6 +1,6 @@
 {{-- 
     This component expects a single prop: 'dateRanges'.
-    The expected data structure is now an associative array:
+    The expected data structure comes in as a PHP associative array and get's converted to a JavaScript Object
     [
         '2024' => ['PP 27 (12/15 - 12/31)', 'PP26 (12/01 - 12/14)', ...],
         '2023' => [ ... ]
@@ -40,7 +40,7 @@
                 <label class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Quick Filters</label>
             </div>
             <div class="flex items-center gap-2">
-                <template x-for="filter in ['active', 'hourly', 'salaried']" :key="filter">
+                <template x-for="filter in ['hourly', 'salaried']" :key="filter">
                     <button
                         type="button"
                         @click="toggleFilter(filter)"
@@ -71,7 +71,7 @@
                 // Initialize Instance Variables
                 this.selectedYear = new Date().getFullYear().toString();
                 this.selectedDateRange = this.getDateRangeOptions()[0] || null;
-                this.activeFilters = ["active"]
+                this.activeFilters = []
                 this.isUpdating = false;
 
                 // Set up watchers //

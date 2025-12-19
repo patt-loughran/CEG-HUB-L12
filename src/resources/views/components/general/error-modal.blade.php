@@ -24,7 +24,7 @@
         <div class="flex items-start justify-between">
             <div class="flex items-center gap-3">
                 <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600">
-                   <x-general.icon :name="'warning'" class="h-6 w-6" />
+                   <x-general.icon name="warning" class="h-6 w-6" />
                 </div>
                 <h3 class="text-xl font-bold text-slate-800">An Error Occurred</h3>
             </div>

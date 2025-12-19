@@ -37,6 +37,8 @@ class PayrollController extends Controller
         
         // Process each year
         foreach ($payPeriodsData as $year => $periods) {
+            if ((int)$year > $currentYear) continue;
+
             $payPeriods = [];
             
             // Process each pay period in the year
@@ -56,6 +58,7 @@ class PayrollController extends Controller
                 if ((int)$year === $currentYear && $startDate->greaterThan($currentDate)) {
                     continue;
                 }
+
                 // Format pay period number (PP 01, PP 02, etc.)
                 $ppNumber = str_pad($index + 1, 2, '0', STR_PAD_LEFT);
                 
@@ -123,10 +126,15 @@ class PayrollController extends Controller
 
         $userMatchFilter = [];
 
-        // Handle 'active' filter
-        if (in_array('active', $activeFilters)) {
-            $userMatchFilter['active'] = true;
-        }
+        $userMatchFilter['employment_history'] = [
+            '$elemMatch' => [
+                'start_date' => ['$lte' => new \MongoDB\BSON\UTCDateTime($endDate->getTimestamp() * 1000)],
+                '$or' => [
+                    ['end_date' => ['$gte' => new \MongoDB\BSON\UTCDateTime($startDate->getTimestamp() * 1000)]],
+                    ['end_date' => null]
+                ]
+            ]
+        ];
 
         // Handle wage types (Hourly AND/OR Salaried)
         $selectedWageTypes = [];
@@ -189,6 +197,7 @@ class PayrollController extends Controller
                         'name' => '$name',
                     ],
                     'expected_billable' => ['$first' => '$expected_billable'],
+                    'wage_type' => ['$first' => '$wage_type'],
                     
                     // PTO Calculation
                     'pto' => [
@@ -309,9 +318,14 @@ class PayrollController extends Controller
                             'else' => 0,
                         ],
                     ],
-                    'overtime' => [
+                   'overtime' => [
                         '$cond' => [
-                            'if' => ['$gt' => ['$total_hours', 80]],
+                            'if' => [
+                                '$and' => [
+                                    ['$eq' => ['$wage_type', 'hourly']],
+                                    ['$gt' => ['$total_hours', 80]]
+                                ]
+                            ],
                             'then' => ['$subtract' => ['$total_hours', 80]],
                             'else' => 0,
                         ],
@@ -368,6 +382,7 @@ class PayrollController extends Controller
             'averageBillablePercentage' => round($averageBillablePercentage, 2),
             'payPeriodIdentifier' => $validated['dateRangeDropdown']
         ];
+
         return response()->json($response);
 
         } catch (\Exception $e) {
