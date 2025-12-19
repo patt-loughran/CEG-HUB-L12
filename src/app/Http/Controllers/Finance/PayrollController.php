@@ -86,315 +86,379 @@ class PayrollController extends Controller
     public function getData(Request $request) {
         try{
 
-        $validated = $request->validate([
-        'year' => 'required|string',
-        'dateRangeDropdown' => 'required|string',
-        'activeFilters' => 'present|array'
-        ]);
+            $validated = $request->validate([
+            'year' => 'required|string',
+            'dateRangeDropdown' => 'required|string',
+            'activeFilters' => 'present|array'
+            ]);
 
-        $year = $validated['year'];
-        $startDate = null;
-        $endDate = null;
-        $activeFilters = $validated['activeFilters'];
+            $year = $validated['year'];
+            $startDate = null;
+            $endDate = null;
+            $activeFilters = $validated['activeFilters'];
 
-        // Use regex to extract the MM/DD parts from a string like "PP 05 (03/16 - 03/29)"
-        preg_match('/\((\d{2}\/\d{2}) - (\d{2}\/\d{2})\)/', $validated['dateRangeDropdown'], $matches);
+            // Use regex to extract the MM/DD parts from a string like "PP 05 (03/16 - 03/29)"
+            preg_match('/\((\d{2}\/\d{2}) - (\d{2}\/\d{2})\)/', $validated['dateRangeDropdown'], $matches);
 
-        if (count($matches) === 3) {
-            $startString = $matches[1] . '/' . $year; // e.g., "03/16/2024"
-            $endString = $matches[2] . '/' . $year;   // e.g., "03/29/2024"
+            if (count($matches) === 3) {
+                $startString = $matches[1] . '/' . $year; // e.g., "03/16/2024"
+                $endString = $matches[2] . '/' . $year;   // e.g., "03/29/2024"
 
-            $startDate = Carbon::createFromFormat('m/d/Y', $startString)->startOfDay();
-            $endDate = Carbon::createFromFormat('m/d/Y', $endString)->endOfDay();
+                $startDate = Carbon::createFromFormat('m/d/Y', $startString)->startOfDay();
+                $endDate = Carbon::createFromFormat('m/d/Y', $endString)->endOfDay();
 
-            // NUANCE: Handle pay periods that cross over into the next year.
-            // If the end date is earlier in the year than the start date, it must be in the following year.
-            if ($endDate->lt($startDate)) {
-                $endDate->addYear();
+                // NUANCE: Handle pay periods that cross over into the next year.
+                // If the end date is earlier in the year than the start date, it must be in the following year.
+                if ($endDate->lt($startDate)) {
+                    $endDate->addYear();
+                }
             }
-        }
 
-         // Failsafe: if date parsing failed for any reason, return an error.
-        if (!$startDate || !$endDate) {
-            return response()->json(['error' => 'Could not determine a valid date range.'], 400);
-        }
+            // Failsafe: if date parsing failed for any reason, return an error.
+            if (!$startDate || !$endDate) {
+                return response()->json(['error' => 'Could not determine a valid date range.'], 400);
+            }
 
-        // 1. Fetch internal project codes and 200 codes
-        $internalProjectCodes = Project::where('is_internal', true)->pluck('projectcode')->toArray();
-        $codes_200 = GlobalDoc::where('name', "200_codes")->first()?->{'200_codes'} ?? ['Parental Leave', 'Jury Duty', 'Funeral', 'Bereavement', 'FMLA', 'UTO'];
-        $allSpecialCEGSubProjects = array_unique(array_merge(['PTO', 'Holiday'], $codes_200));
+            // 1. Fetch internal project codes and 200 codes
+            $internalProjectCodes = Project::where('is_internal', true)->pluck('projectcode')->toArray();
+            $codes_200 = GlobalDoc::where('name', "200_codes")->first()?->{'200_codes'} ?? ['Parental Leave', 'Jury Duty', 'Funeral', 'Bereavement', 'FMLA', 'UTO'];
+            $allSpecialCEGSubProjects = array_unique(array_merge(['PTO', 'Holiday'], $codes_200));
 
-        $userMatchFilter = [];
+            $userMatchFilter = [];
 
-        $userMatchFilter['employment_history'] = [
-            '$elemMatch' => [
-                'start_date' => ['$lte' => new \MongoDB\BSON\UTCDateTime($endDate->getTimestamp() * 1000)],
-                '$or' => [
-                    ['end_date' => ['$gte' => new \MongoDB\BSON\UTCDateTime($startDate->getTimestamp() * 1000)]],
-                    ['end_date' => null]
+            $userMatchFilter['employment_history'] = [
+                '$elemMatch' => [
+                    'start_date' => ['$lte' => new \MongoDB\BSON\UTCDateTime($endDate->getTimestamp() * 1000)],
+                    '$or' => [
+                        ['end_date' => ['$gte' => new \MongoDB\BSON\UTCDateTime($startDate->getTimestamp() * 1000)]],
+                        ['end_date' => null]
+                    ]
                 ]
-            ]
-        ];
+            ];
 
-        // Handle wage types (Hourly AND/OR Salaried)
-        $selectedWageTypes = [];
-        if (in_array('hourly', $activeFilters)) $selectedWageTypes[] = 'hourly';
-        if (in_array('salaried', $activeFilters)) $selectedWageTypes[] = 'salaried';
+            // Handle wage types (Hourly AND/OR Salaried)
+            $selectedWageTypes = [];
+            if (in_array('hourly', $activeFilters)) $selectedWageTypes[] = 'hourly';
+            if (in_array('salaried', $activeFilters)) $selectedWageTypes[] = 'salaried';
 
-        // If wage types are selected, use the $in operator to match ANY of them
-        if (!empty($selectedWageTypes)) {
-            $userMatchFilter['wage_type'] = ['$in' => $selectedWageTypes];
-        }
+            // If wage types are selected, use the $in operator to match ANY of them
+            if (!empty($selectedWageTypes)) {
+                $userMatchFilter['wage_type'] = ['$in' => $selectedWageTypes];
+            }
 
 
-        $pipeline = [
-            // Stage 1: Filter Users FIRST.
-            // This ensures we don't waste time looking up hours for inactive users.
-            // This replaces the hardcoded { active: true } from the raw pipeline.
-             (!empty($userMatchFilter)) ? ['$match' => $userMatchFilter] : null,
+            $pipeline = [
+                // Stage 1: Filter Users FIRST.
+                // This ensures we don't waste time looking up hours for inactive users.
+                // This replaces the hardcoded { active: true } from the raw pipeline.
+                (!empty($userMatchFilter)) ? ['$match' => $userMatchFilter] : null,
 
-            // Stage 2: The "Left Join" Lookup.
-            // We look into the 'hours' collection, filtering by date immediately inside the join.
-            [
-                '$lookup' => [
-                    'from' => 'hours',
-                    'let' => ['user_email' => '$email'], // Pass the user's email to the sub-pipeline
-                    'pipeline' => [
-                        [
-                            '$match' => [
-                                '$expr' => [
-                                    '$eq' => ['$user_email', '$$user_email'] // Match email
-                                ],
-                                // Apply Date Filters here inside the lookup
-                                'date' => [
-                                    '$gte' => new \MongoDB\BSON\UTCDateTime($startDate->getTimestamp() * 1000),
-                                    '$lte' => new \MongoDB\BSON\UTCDateTime($endDate->getTimestamp() * 1000),
+                // Stage 2: The "Left Join" Lookup.
+                // We look into the 'hours' collection, filtering by date immediately inside the join.
+                [
+                    '$lookup' => [
+                        'from' => 'hours',
+                        'let' => ['user_email' => '$email'], // Pass the user's email to the sub-pipeline
+                        'pipeline' => [
+                            [
+                                '$match' => [
+                                    '$expr' => [
+                                        '$eq' => ['$user_email', '$$user_email'] // Match email
+                                    ],
+                                    // Apply Date Filters here inside the lookup
+                                    'date' => [
+                                        '$gte' => new \MongoDB\BSON\UTCDateTime($startDate->getTimestamp() * 1000),
+                                        '$lte' => new \MongoDB\BSON\UTCDateTime($endDate->getTimestamp() * 1000),
+                                    ],
                                 ],
                             ],
                         ],
+                        'as' => 'hours_entries',
                     ],
-                    'as' => 'hours_entries',
                 ],
-            ],
 
-            // Stage 3: Unwind the hours, BUT keep users with empty arrays.
-            // This is what allows "Zero Hour" employees to show up in the report.
-            [
-                '$unwind' => [
-                    'path' => '$hours_entries',
-                    'preserveNullAndEmptyArrays' => true,
+                // Stage 3: Unwind the hours, BUT keep users with empty arrays.
+                // This is what allows "Zero Hour" employees to show up in the report.
+                [
+                    '$unwind' => [
+                        'path' => '$hours_entries',
+                        'preserveNullAndEmptyArrays' => true,
+                    ],
                 ],
-            ],
 
-            // Stage 4: Grouping & Calculation
-            // Note: Field references are slightly different because we started on the User object.
-            // (e.g., '$employee_number' is now at the root, not inside 'userInfo')
-            [
-                '$group' => [
-                    '_id' => [
-                        'mongo_id' => '$_id', 
-                        'employee_id' => '$employee_number',
-                        'name' => '$name',
-                    ],
-                    'expected_billable' => ['$first' => '$expected_billable'],
-                    'wage_type' => ['$first' => '$wage_type'],
-                    
-                    // PTO Calculation
-                    'pto' => [
-                        '$sum' => [
-                            '$cond' => [
-                                'if' => [
-                                    '$and' => [
-                                        ['$eq' => ['$hours_entries.project_code', 'CEG']],
-                                        ['$eq' => ['$hours_entries.sub_project', 'PTO']],
+                // Stage 4: Grouping & Calculation
+                // Note: Field references are slightly different because we started on the User object.
+                // (e.g., '$employee_number' is now at the root, not inside 'userInfo')
+                [
+                    '$group' => [
+                        '_id' => [
+                            'mongo_id' => '$_id', 
+                            'employee_id' => '$employee_number',
+                            'name' => '$name',
+                        ],
+                        'expected_billable' => ['$first' => '$expected_billable'],
+                        'wage_type' => ['$first' => '$wage_type'],
+                        
+                        // PTO Calculation
+                        'pto' => [
+                            '$sum' => [
+                                '$cond' => [
+                                    'if' => [
+                                        '$and' => [
+                                            ['$eq' => ['$hours_entries.project_code', 'CEG']],
+                                            ['$eq' => ['$hours_entries.sub_project', 'PTO']],
+                                        ],
                                     ],
+                                    'then' => '$hours_entries.hours',
+                                    'else' => 0,
                                 ],
-                                'then' => '$hours_entries.hours',
-                                'else' => 0,
                             ],
                         ],
-                    ],
 
-                    // Holiday Calculation
-                    'holiday' => [
-                        '$sum' => [
-                            '$cond' => [
-                                'if' => [
-                                    '$and' => [
-                                        ['$eq' => ['$hours_entries.project_code', 'CEG']],
-                                        ['$eq' => ['$hours_entries.sub_project', 'Holiday']],
+                        // Holiday Calculation
+                        'holiday' => [
+                            '$sum' => [
+                                '$cond' => [
+                                    'if' => [
+                                        '$and' => [
+                                            ['$eq' => ['$hours_entries.project_code', 'CEG']],
+                                            ['$eq' => ['$hours_entries.sub_project', 'Holiday']],
+                                        ],
                                     ],
+                                    'then' => '$hours_entries.hours',
+                                    'else' => 0,
                                 ],
-                                'then' => '$hours_entries.hours',
-                                'else' => 0,
                             ],
                         ],
-                    ],
 
-                    // Other 200 Calculation (Using your Laravel variable $codes_200)
-                    'other_200' => [
-                        '$sum' => [
-                            '$cond' => [
-                                'if' => [
-                                    '$and' => [
-                                        ['$eq' => ['$hours_entries.project_code', 'CEG']],
-                                        ['$in' => ['$hours_entries.sub_project', $codes_200]],
-                                        ['$ne' => ['$hours_entries.sub_project', 'PTO']],
-                                        ['$ne' => ['$hours_entries.sub_project', 'Holiday']],
+                        // Other 200 Calculation (Using your Laravel variable $codes_200)
+                        'other_200' => [
+                            '$sum' => [
+                                '$cond' => [
+                                    'if' => [
+                                        '$and' => [
+                                            ['$eq' => ['$hours_entries.project_code', 'CEG']],
+                                            ['$in' => ['$hours_entries.sub_project', $codes_200]],
+                                            ['$ne' => ['$hours_entries.sub_project', 'PTO']],
+                                            ['$ne' => ['$hours_entries.sub_project', 'Holiday']],
+                                        ],
                                     ],
+                                    'then' => '$hours_entries.hours',
+                                    'else' => 0,
                                 ],
-                                'then' => '$hours_entries.hours',
-                                'else' => 0,
                             ],
                         ],
-                    ],
 
-                    // Other Non-Billable Calculation (Using your Laravel variables)
-                    'other_nb' => [
-                        '$sum' => [
-                            '$cond' => [
-                                'if' => [
-                                    '$and' => [
-                                        ['$in' => ['$hours_entries.project_code', $internalProjectCodes]],
-                                        ['$or' => [
-                                            ['$ne' => ['$hours_entries.project_code', 'CEG']],
-                                            ['$and' => [
-                                                ['$eq' => ['$hours_entries.project_code', 'CEG']],
-                                                ['$not' => ['$in' => ['$hours_entries.sub_project', $allSpecialCEGSubProjects]]]
+                        // Other Non-Billable Calculation (Using your Laravel variables)
+                        'other_nb' => [
+                            '$sum' => [
+                                '$cond' => [
+                                    'if' => [
+                                        '$and' => [
+                                            ['$in' => ['$hours_entries.project_code', $internalProjectCodes]],
+                                            ['$or' => [
+                                                ['$ne' => ['$hours_entries.project_code', 'CEG']],
+                                                ['$and' => [
+                                                    ['$eq' => ['$hours_entries.project_code', 'CEG']],
+                                                    ['$not' => ['$in' => ['$hours_entries.sub_project', $allSpecialCEGSubProjects]]]
+                                                ]]
                                             ]]
-                                        ]]
+                                        ]
+                                    ],
+                                    'then' => '$hours_entries.hours',
+                                    'else' => 0,
+                                ],
+                            ],
+                        ],
+
+                        // Billable Calculation (Using your Laravel variables)
+                        'billable' => [
+                            '$sum' => [
+                                '$cond' => [
+                                    'if' => [
+                                        '$and' => [
+                                            ['$ne' => ['$hours_entries.project_code', 'CEG']],
+                                            ['$not' => ['$in' => ['$hours_entries.project_code', $internalProjectCodes]]],
+                                        ],
+                                    ],
+                                    'then' => '$hours_entries.hours',
+                                    'else' => 0,
+                                        ],
+                                    ],
+                                ],
+                        
+                        // Total Hours
+                        'total_hours' => ['$sum' => '$hours_entries.hours'],
+                    ],
+                ],
+
+                // Stage 5: Projection (Math) - Unchanged
+                [
+                    '$project' => [
+                        '_id' => 0,
+                        'id' => ['$toString' => '$_id.mongo_id'],
+                        'employee_name' => '$_id.name',
+                        'employee_id' => '$_id.employee_id',
+                        'expected_billable' => '$expected_billable',
+                        'wage_type' => '$wage_type',
+                        'pto' => '$pto',
+                        'holiday' => '$holiday',
+                        'other_200' => '$other_200',
+                        'other_nb' => '$other_nb',
+                        'total_nb' => [
+                            '$add' => ['$pto', '$holiday', '$other_200', '$other_nb'],
+                        ],
+                        'billable' => '$billable',
+                        'total_hours' => '$total_hours',
+                        'billable_percentage' => [
+                            '$cond' => [
+                                'if' => ['$gt' => ['$total_hours', 0]],
+                                'then' => [
+                                    '$multiply' => [['$divide' => ['$billable', '$total_hours']], 100],
+                                ],
+                                'else' => 0,
+                            ],
+                        ],
+                        'overtime' => [
+                            '$cond' => [
+                                'if' => [
+                                    '$and' => [
+                                        ['$eq' => ['$wage_type', 'hourly']],
+                                        ['$gt' => ['$total_hours', 80]]
                                     ]
                                 ],
-                                'then' => '$hours_entries.hours',
+                                'then' => ['$subtract' => ['$total_hours', 80]],
                                 'else' => 0,
                             ],
                         ],
-                    ],
-
-                    // Billable Calculation (Using your Laravel variables)
-                    'billable' => [
-                        '$sum' => [
-                            '$cond' => [
-                                'if' => [
-                                    '$and' => [
-                                        ['$ne' => ['$hours_entries.project_code', 'CEG']],
-                                        ['$not' => ['$in' => ['$hours_entries.project_code', $internalProjectCodes]]],
-                                    ],
-                                ],
-                                'then' => '$hours_entries.hours',
-                                'else' => 0,
-                                    ],
-                                ],
-                            ],
-                    
-                    // Total Hours
-                    'total_hours' => ['$sum' => '$hours_entries.hours'],
-                ],
-            ],
-
-            // Stage 5: Projection (Math) - Unchanged
-            [
-                '$project' => [
-                    '_id' => 0,
-                    'id' => ['$toString' => '$_id.mongo_id'],
-                    'employee_name' => '$_id.name',
-                    'employee_id' => '$_id.employee_id',
-                    'expected_billable' => '$expected_billable',
-                    'pto' => '$pto',
-                    'holiday' => '$holiday',
-                    'other_200' => '$other_200',
-                    'other_nb' => '$other_nb',
-                    'total_nb' => [
-                        '$add' => ['$pto', '$holiday', '$other_200', '$other_nb'],
-                    ],
-                    'billable' => '$billable',
-                    'total_hours' => '$total_hours',
-                    'billable_percentage' => [
-                        '$cond' => [
-                            'if' => ['$gt' => ['$total_hours', 0]],
-                            'then' => [
-                                '$multiply' => [['$divide' => ['$billable', '$total_hours']], 100],
-                            ],
-                            'else' => 0,
-                        ],
-                    ],
-                   'overtime' => [
-                        '$cond' => [
-                            'if' => [
-                                '$and' => [
-                                    ['$eq' => ['$wage_type', 'hourly']],
-                                    ['$gt' => ['$total_hours', 80]]
-                                ]
-                            ],
-                            'then' => ['$subtract' => ['$total_hours', 80]],
-                            'else' => 0,
-                        ],
+                        'grouped' => ['$literal' => false]
                     ],
                 ],
-            ],
 
-            // Stage 6: Sort - Unchanged
-            [
-                '$sort' => [
-                    'employee_name' => 1
+                // Stage 6: Sort - Unchanged
+                [
+                    '$sort' => [
+                        'employee_name' => 1
+                    ]
                 ]
-            ]
-        ];
+            ];
 
-        // Clean up the pipeline array (remove nulls if Stage 1 conditional failed, though I added a default)
-        $pipeline = array_values(array_filter($pipeline));
+            // Clean up the pipeline array (remove nulls if Stage 1 conditional failed, though I added a default)
+            $pipeline = array_values(array_filter($pipeline));
 
-        // EXECUTION: IMPORTANT - Run this on the User model
-        $results = User::raw(function ($collection) use ($pipeline) {
-            return $collection->aggregate($pipeline);
-        })->toArray();
+            // EXECUTION: IMPORTANT - Run this on the User model
+            $results = User::raw(function ($collection) use ($pipeline) {
+                return $collection->aggregate($pipeline);
+            })->toArray();
 
-        Log::debug($results);
+            $summaryRows = $this->getSummaryRows($results);
 
-       // Initialize totals
-        $totalCompanyHours = 0;
-        $totalCompanyOvertime = 0;
-        $totalBillableHoursOfBillableStaff = 0; // For weighted average
-        $totalHoursOfBillableStaff = 0;         // For weighted average
+        // Initialize totals
+            $totalCompanyHours = 0;
+            $totalCompanyOvertime = 0;
+            $totalBillableHoursOfBillableStaff = 0; // For weighted average
+            $totalHoursOfBillableStaff = 0;         // For weighted average
 
-        foreach ($results as $row) {
-            // Sum company-wide totals regardless of billable status
-            $totalCompanyHours += $row['total_hours'];
-            $totalCompanyOvertime += $row['overtime'];
+            foreach ($results as $row) {
+                // Sum company-wide totals regardless of billable status
+                $totalCompanyHours += $row['total_hours'];
+                $totalCompanyOvertime += $row['overtime'];
 
-            // Only include billable staff in the average calculation
-            if (isset($row['expected_billable']) && $row['expected_billable']) {
-                $totalBillableHoursOfBillableStaff += $row['billable'];
-                $totalHoursOfBillableStaff += $row['total_hours'];
+                // Only include billable staff in the average calculation
+                if (isset($row['expected_billable']) && $row['expected_billable']) {
+                    $totalBillableHoursOfBillableStaff += $row['billable'];
+                    $totalHoursOfBillableStaff += $row['total_hours'];
+                }
             }
-        }
 
-        // Calculate the weighted average billable percentage
-        $averageBillablePercentage = ($totalHoursOfBillableStaff > 0)
-            ? ($totalBillableHoursOfBillableStaff / $totalHoursOfBillableStaff) * 100
-            : 0;
+            // Calculate the weighted average billable percentage
+            $averageBillablePercentage = ($totalHoursOfBillableStaff > 0)
+                ? ($totalBillableHoursOfBillableStaff / $totalHoursOfBillableStaff) * 100
+                : 0;
 
-        // Prepare the response
-        $response = [
-            'tableData' => $results,
-            'totalHours' => $totalCompanyHours,
-            'totalOvertime' => $totalCompanyOvertime,
-            'averageBillablePercentage' => round($averageBillablePercentage, 2),
-            'payPeriodIdentifier' => $validated['dateRangeDropdown']
-        ];
+            // Prepare the response
+            $response = [
+                'tableData' => $results,
+                'totalHours' => $totalCompanyHours,
+                'totalOvertime' => $totalCompanyOvertime,
+                'averageBillablePercentage' => round($averageBillablePercentage, 2),
+                'payPeriodIdentifier' => $validated['dateRangeDropdown'],
+                'summaryRows' => $summaryRows
+            ];
 
-        return response()->json($response);
+            return response()->json($response);
 
         } catch (\Exception $e) {
-        Log::error('PayrollController getData error: ' . $e->getMessage(), [
-            'trace' => $e->getTraceAsString(),
-            'request' => $request->all()
-        ]);
-        
-        return response()->json([
-            'error' => $e->getMessage()
-        ], 500);
+            Log::error('PayrollController getData error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+                'request' => $request->all()
+            ]);
+            
+            return response()->json([
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
+
+    private function getSummaryRows($results) {
+        // 1. Accumulate totals by wage_type
+        $groupedByType = [];
+        
+        foreach ($results as $item) {
+            // Default to 'Other' if wage_type is missing, though your pipeline ensures it exists
+            $type = $item['wage_type'] ?? 'Other';
+            
+            if (!isset($groupedByType[$type])) {
+                $groupedByType[$type] = [
+                    'pto' => 0,
+                    'holiday' => 0,
+                    'other_200' => 0,
+                    'other_nb' => 0,
+                    'total_nb' => 0,
+                    'billable' => 0,
+                    'total_hours' => 0,
+                    'overtime' => 0,
+                ];
+            }
+
+            $groupedByType[$type]['pto'] += $item['pto'];
+            $groupedByType[$type]['holiday'] += $item['holiday'];
+            $groupedByType[$type]['other_200'] += $item['other_200'];
+            $groupedByType[$type]['other_nb'] += $item['other_nb'];
+            $groupedByType[$type]['total_nb'] += $item['total_nb'];
+            $groupedByType[$type]['billable'] += $item['billable'];
+            $groupedByType[$type]['total_hours'] += $item['total_hours'];
+            $groupedByType[$type]['overtime'] += $item['overtime'];
+        }
+
+        $summaryRows = [];
+
+        // 2. Build the final summary row structure
+        foreach ($groupedByType as $type => $totals) {
+            // Calculate weighted billable percentage (Sum of Billable / Sum of Total Hours)
+            $weightedBillablePct = ($totals['total_hours'] > 0) 
+                ? ($totals['billable'] / $totals['total_hours']) * 100 
+                : 0;
+
+            $summaryRows[] = [
+                'id' => 'summary-' . $type,
+                'employee_name' => ucfirst($type) . ' Totals', // e.g., "Hourly Totals"
+                'employee_id' => 'N/A',
+                'expected_billable' => null,
+                'wage_type' => $type,
+                'pto' => $totals['pto'],
+                'holiday' => $totals['holiday'],
+                'other_200' => $totals['other_200'],
+                'other_nb' => $totals['other_nb'],
+                'total_nb' => $totals['total_nb'],
+                'billable' => $totals['billable'],
+                'total_hours' => $totals['total_hours'],
+                'billable_percentage' => round($weightedBillablePct, 2),
+                'overtime' => $totals['overtime'],
+                'grouped' => true // Distinct flag for frontend styling
+            ];
+        }
+        return $summaryRows;
     }
 
 }
