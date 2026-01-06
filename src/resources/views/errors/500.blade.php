@@ -20,17 +20,12 @@
             <h1 class="mt-6 text-5xl font-bold tracking-tight text-slate-800">500</h1>
             <h2 class="mt-2 text-2xl font-semibold text-slate-700">Internal Server Error</h2>
             
-            <!-- User Message -->
-            <p class="mt-4 text-base text-slate-500">
-                {{ $user_message ?? 'Sorry, something went wrong on our end. We have been notified and are looking into it.' }}
-            </p>
-            
             <!-- Technical Details -->
             <div class="mt-6">
                 <div class="rounded-md border border-slate-200 bg-slate-50 p-4 text-left">
-                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-2">Technical Information</p>
+                    <p class="text-xs font-semibold uppercase tracking-wide text-slate-600 mb-2">Error Details</p>
                     <div class="max-h-64 overflow-y-auto">
-                        <p class="text-sm text-slate-700 font-mono break-words whitespace-pre-wrap">{{ $dev_message ?? 'No additional technical information available.' }}</p>
+                        <p class="text-sm text-slate-700 font-mono break-words whitespace-pre-wrap">{{ $error_message ?? 'No additional technical information available.' }}</p>
                     </div>
                 </div>
             </div>

@@ -1,10 +1,11 @@
 <div x-data="PPQuickListLogic()" 
      @payroll-data-loading.window="handlePayrollFetchInitiated($event)"
      @payroll-data-updated.window="handlePayrollDataUpdate($event)"
-     @payroll-data-error.window="handlePayrollError($event)"
+     @payroll-fetch-error.window="handlePayrollError($event)" {{-- CHANGE: Updated Event Name --}}
      class="bg-white p-6 border border-slate-300 rounded-lg shadow-sm flex-1 flex flex-col min-h-[320px] overflow-hidden">
+    
     <!-- Actual Content -->
-    <template x-if="!isLoading">
+    <template x-if="!isLoading && !error"> {{-- CHANGE: Added !error check here to prevent flicker --}}
         <div class="flex-1 flex flex-col overflow-hidden">
             <!-- Header -->
             <div class="flex justify-between items-center">
@@ -55,67 +56,24 @@
                 <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
             </div>
             <h3 class="font-bold text-slate-800 text-lg">Request Failed</h3>
-            <p class="text-sm mt-1 mb-4">Could not retrieve data from the server.</p>
+            <p class="text-sm mt-1 mb-4">Could not retrieve data.</p>
             <p class="text-xs font-mono text-red-700 bg-red-50 p-2 rounded-md" x-text="error"></p>
         </div>
     </template>
 
-        <!-- Skeleton Loader -->
+    <!-- Skeleton Loader (Unchanged) -->
     <template x-if="isLoading">
         <div class="animate-pulse flex-1 flex flex-col">
-            <!-- Header Skeleton -->
-            <div class="flex justify-between items-center">
-                <div class="h-6 w-1/3 bg-slate-200 rounded"></div>
-                <div class="h-5 w-1/6 bg-slate-200 rounded"></div>
-            </div>
+            <div class="flex justify-between items-center"><div class="h-6 w-1/3 bg-slate-200 rounded"></div><div class="h-5 w-1/6 bg-slate-200 rounded"></div></div>
             <div class="h-3 w-2/5 bg-slate-200 rounded mt-2 mb-4"></div>
-
-            <!-- Progress Bar Skeleton -->
             <div class="w-full bg-slate-200 rounded-full h-2"></div>
-
-            <!-- List Header Skeleton -->
-            <div class="flex justify-between items-baseline border-t border-slate-200 mt-4 pt-3 mb-2">
-                <div class="h-4 w-1/4 bg-slate-200 rounded"></div>
-                <div class="h-4 w-1/5 bg-slate-200 rounded"></div>
-            </div>
-
-            <!-- List Skeleton -->
+            <div class="flex justify-between items-baseline border-t border-slate-200 mt-4 pt-3 mb-2"><div class="h-4 w-1/4 bg-slate-200 rounded"></div><div class="h-4 w-1/5 bg-slate-200 rounded"></div></div>
             <div class="flex-1 overflow-y-auto -mx-2">
                 <ul class="px-2">
-                    <li class="flex items-center justify-between py-2.5 px-2">
-                        <div class="flex items-center gap-3 w-full">
-                            <div class="flex-shrink-0 h-8 w-8 rounded-full bg-slate-200"></div>
-                            <div class="h-4 bg-slate-200 rounded w-1/2"></div>
-                        </div>
-                        <div class="h-4 bg-slate-200 rounded w-1/4"></div>
-                    </li>
-                    <li class="flex items-center justify-between py-2.5 px-2">
-                        <div class="flex items-center gap-3 w-full">
-                            <div class="flex-shrink-0 h-8 w-8 rounded-full bg-slate-200"></div>
-                            <div class="h-4 bg-slate-200 rounded w-2/3"></div>
-                        </div>
-                        <div class="h-4 bg-slate-200 rounded w-1/6"></div>
-                    </li>
-                    <li class="flex items-center justify-between py-2.5 px-2">
-                        <div class="flex items-center gap-3 w-full">
-                            <div class="flex-shrink-0 h-8 w-8 rounded-full bg-slate-200"></div>
-                            <div class="h-4 bg-slate-200 rounded w-1/2"></div>
-                        </div>
-                        <div class="h-4 bg-slate-200 rounded w-1/4"></div>
-                    </li>
-                     <li class="flex items-center justify-between py-2.5 px-2">
-                        <div class="flex items-center gap-3 w-full">
-                            <div class="flex-shrink-0 h-8 w-8 rounded-full bg-slate-200"></div>
-                            <div class="h-4 bg-slate-200 rounded w-1/2"></div>
-                        </div>
-                        <div class="h-4 bg-slate-200 rounded w-1/4"></div>
-                    </li>
+                    <template x-for="i in 4"><li class="flex items-center justify-between py-2.5 px-2"><div class="flex items-center gap-3 w-full"><div class="flex-shrink-0 h-8 w-8 rounded-full bg-slate-200"></div><div class="h-4 bg-slate-200 rounded w-1/2"></div></div><div class="h-4 bg-slate-200 rounded w-1/4"></div></li></template>
                 </ul>
             </div>
-             <!-- Button Skeleton -->
-            <div class="mt-auto pt-4 border-t border-slate-200">
-                <div class="h-9 w-full bg-slate-200 rounded-md"></div>
-            </div>
+            <div class="mt-auto pt-4 border-t border-slate-200"><div class="h-9 w-full bg-slate-200 rounded-md"></div></div>
         </div>
     </template>
 </div>
@@ -133,23 +91,55 @@
             // 2. init()
             init() {
                 this.isLoading = true;
+                this.employeeHoursData = []; // Initialize as empty array to prevent length errors
             },
 
             // 3. otherFunctions()
+            handlePayrollFetchInitiated() {
+                this.isLoading = true;
+                this.error = null;
+            },
+
             handlePayrollDataUpdate(event) {
-                // Ensure the event has the data we need
-                if (event.detail && event.detail.tableData) {
-                    this.employeeHoursData = event.detail.tableData;
-                    this.payPeriodIdentifier = event.detail.payPeriodIdentifier || 'N/A';
-                    this.isLoading = false;
+                // 1. Extract component-specific response
+                // The controller key for this data matches the table's key: 'tableData'
+                const responseObj = event.detail.tableData;
+
+                if (!responseObj) {
+                     this.handlePayrollError({ detail: { message: "Invalid response format" } });
+                     return;
                 }
+
+                // 2. Check for Component Error
+                if (responseObj.errors) {
+                    this.error = responseObj.errors;
+                    this.employeeHoursData = [];
+                    this.isLoading = false;
+                    return;
+                }
+
+                // 3. Handle Success
+                // The structure inside responseObj.data is { tableData: [...], summaryRows: [...], payPeriodIdentifier: "..." }
+                const payload = responseObj.data;
+                
+                this.employeeHoursData = payload.tableData; 
+                this.payPeriodIdentifier = payload.payPeriodIdentifier || 'N/A';
+                
+                this.isLoading = false;
+                this.error = null;
+            },
+
+            handlePayrollError(event) {
+                // This handles Global/Network errors (500s or timeouts)
+                this.isLoading = false;
+                this.employeeHoursData = []; 
+                this.error = event.detail?.message || 'An unknown error occurred.';
             },
 
             getSortedEmployeeHoursData() {
-                if (!this.employeeHoursData) return [];
+                if (!this.employeeHoursData || this.employeeHoursData.length === 0) return [];
                 return [...this.employeeHoursData].sort((a, b) => a.total_hours - b.total_hours);
             },
-
 
             getCompletedCount() {
                 if (!this.employeeHoursData) return 0;
@@ -171,19 +161,7 @@
                 if (total === 0) return 0;
                 const completed = this.getCompletedCount();
                 return (completed / total) * 100;
-            },
-
-            handlePayrollFetchInitiated() {
-                this.isLoading = true;
-                this.error = null; // Clear previous errors
-            },
-
-            handlePayrollError(event) {
-                this.isLoading = false;
-                this.employeeHoursData = null; // Clear any stale data
-                this.error = event.detail?.message || 'An unknown error occurred.';
-            },
-
+            }
         }
     }
 </script>

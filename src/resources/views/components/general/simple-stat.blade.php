@@ -4,9 +4,9 @@
 
     It listens for events from a data-provider component to update its state.
     The events it listens to are defined by the `eventPrefix` prop.
-    - `{{eventPrefix}}-loading`: Shows a loading skeleton.
-    - `{{eventPrefix}}-updated`: Receives data and displays the value.
-    - `{{eventPrefix}}-error`: Shows an error state.
+    - `{{eventPrefix}}-data-loading`: Shows a loading skeleton.
+    - `{{eventPrefix}}-data-updated`: Receives data and displays the value.
+    - `{{eventPrefix}}-fetch-error`: Shows an error state.
 
     Props:
     - title: The text label for the statistic (e.g., "Total Hours").
@@ -19,21 +19,21 @@
 @props([
     'title',
     'dataKey',
-    'eventPrefix', // The new, required prop
+    'eventPrefix', 
     'format' => 'number',
     'iconClasses' => 'bg-slate-100 text-slate-700',
     'iconName'
 ])
 
+{{-- HTML Structure --}}
 <div x-data="simpleStatLogic('{{ $dataKey }}', '{{ $format }}')"
-    x-on:{{ $eventPrefix }}-loading.window="handleFetchInitiated()"
-    x-on:{{ $eventPrefix }}-updated.window="handleDataUpdate($event)"
-    x-on:{{ $eventPrefix }}-error.window="handleError()"
+    x-on:{{ $eventPrefix }}-data-loading.window="handleFetchInitiated()"
+    x-on:{{ $eventPrefix }}-data-updated.window="handleDataUpdate($event)"
+    x-on:{{ $eventPrefix }}-fetch-error.window="handleError()"
     class="relative bg-white p-4 border border-slate-200 rounded-lg shadow-sm flex items-center gap-4 flex-1 min-w-[280px]">
 
-    {{-- Main Content Area: Switches between Skeleton and Data view --}}
+    {{-- Skeleton State --}}
     <template x-if="isLoading">
-        {{-- Loading Skeleton State --}}
         <div class="flex items-center gap-4 w-full animate-pulse">
             <div class="flex-shrink-0 w-16 h-16 bg-slate-200 rounded-lg"></div>
             <div class="flex-1 space-y-2">
@@ -43,15 +43,19 @@
         </div>
     </template>
 
+    {{-- Data State --}}
     <template x-if="!isLoading">
-        {{-- Data/Error State --}}
         <div class="flex items-center gap-4 w-full">
-            <!-- Left Icon -->
             <div x-bind:class="error ? 'bg-red-100 text-red-700' : '{{ $iconClasses }}'"
                  class="flex-shrink-0 w-16 h-16 rounded-lg flex items-center justify-center transition-colors">
-                <x-general.icon :name="$iconName" class="h-10 w-10" />
+                <template x-if="error">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-8 w-8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" /></svg>
+                </template>
+                <template x-if="!error">
+                    <x-general.icon :name="$iconName" class="h-10 w-10" />
+                </template>
             </div>
-            <!-- Right Content -->
+            
             <div class="flex-1">
                 <label class="text-xs font-semibold text-slate-500 uppercase tracking-wider">{{ $title }}</label>
                 <div class="flex items-baseline gap-2 mt-1">
@@ -61,49 +65,70 @@
         </div>
     </template>
     
-    <!-- Top Right Link (Static for now) -->
-    <a href="#" class="absolute top-3 right-2 p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 rounded-full" title="View historical chart">
+    <a href="#" class="absolute top-3 right-2 p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 rounded-full">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
     </a>
 </div>
 
-{{-- The JavaScript logic remains exactly the same, so it is not duplicated here. --}}
-@push('scripts')
-<script>
-    // No changes needed in the script block.
-    function simpleStatLogic(dataKey, format) {
-        return {
-            value: null,
-            isLoading: null,
-            error: null,
-            init() {
-                this.value = 0;
-                this.isLoading = true;
-                this.error = false;
-            },
-            formattedValue() {
-                if (this.error) return '--';
-                if (this.value === null) return '0';
-                switch (format) {
-                    case 'hours': return this.value.toFixed(1);
-                    case 'percentage': return `${this.value.toFixed(1)}%`;
-                    case 'number': default: return this.value.toLocaleString('en-US');
+{{-- Script Logic --}}
+
+@once
+    @push('scripts')
+    <script>
+        function simpleStatLogic(dataKey, format) {
+            return {
+                value: null,
+                isLoading: null,
+                error: null,
+
+                init() {
+                    this.value = 0;
+                    this.isLoading = true;
+                    this.error = false;
+                },
+
+                formattedValue() {
+                    if (this.error) return '--';
+                    if (this.value === null || this.value === undefined) return '0';
+                    
+                    switch (format) {
+                        case 'hours': return Number(this.value).toFixed(2);
+                        case 'percentage': return `${Number(this.value).toFixed(1)}%`;
+                        case 'number': default: return Number(this.value).toLocaleString('en-US');
+                    }
+                },
+
+                handleFetchInitiated() {
+                    this.isLoading = true;
+                    this.error = false;
+                },
+
+                handleDataUpdate(event) {
+                    const responseObj = event.detail[dataKey];
+
+                    if (!responseObj) {
+                        console.warn(`Stat Component: Key '${dataKey}' missing in payload`);
+                        this.handleError(); 
+                        return;
+                    }
+
+                    if (responseObj.errors) {
+                        this.isLoading = false;
+                        this.error = true;
+                        return;
+                    }
+
+                    this.value = responseObj.data;
+                    this.isLoading = false;
+                    this.error = false;
+                },
+
+                handleError() {
+                    this.isLoading = false;
+                    this.error = true;
                 }
-            },
-            handleFetchInitiated() {
-                this.isLoading = true;
-                this.error = false;
-            },
-            handleDataUpdate(event) {
-                this.value = event.detail[dataKey] || 0;
-                this.isLoading = false;
-                this.error = false;
-            },
-            handleError() {
-                this.isLoading = false;
-                this.error = true;
             }
         }
-    }
-</script>
-@endpush
+    </script>
+    @endpush
+@endonce

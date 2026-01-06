@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Finance;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Http\Responses\ApiResponse;
 
 use App\Models\Hour;
 use App\Models\GlobalDoc;
@@ -16,17 +17,27 @@ class PayrollController extends Controller
 {
     public function index()
     {
-        $dateRanges = $this->getDateRanges();
-        return view('finance.payroll', compact('dateRanges'));
+        try {
+            $dateRanges = $this->getDateRanges();
+            return view('finance.payroll', compact('dateRanges'));
+        }
+        catch (\Exception $e) {
+            Log::error('PayrollController error in index(): ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+                'request' => $request->all()
+            ]);
+
+            return response()->view('errors.500', ['error_message' => $e->getMessage()], 500);
+        }
+        
     }
 
     private function getDateRanges()
     {
-        // Fetch the Pay-Periods document from MongoDB
         $payPeriodsDoc = GlobalDoc::where('name', 'Pay-Periods')->first();
         
         if (!$payPeriodsDoc) {
-            return [];
+            throw new \Exception('Pay-Period document not found in MongoDB');
         }
         
         $payPeriodsData = $payPeriodsDoc->{'Pay-Periods'};
@@ -80,12 +91,12 @@ class PayrollController extends Controller
             $result[$year] = $payPeriods;
         }
     
-    return $result;
+        return $result;
     }
 
     public function getData(Request $request) {
+        // Stage 1: Initial Validation
         try{
-
             $validated = $request->validate([
             'year' => 'required|string',
             'dateRangeDropdown' => 'required|string',
@@ -116,10 +127,30 @@ class PayrollController extends Controller
 
             // Failsafe: if date parsing failed for any reason, return an error.
             if (!$startDate || !$endDate) {
-                return response()->json(['error' => 'Could not determine a valid date range.'], 400);
+                throw new \Exception('Failed to parse start and end date');
             }
+        }
+        catch (\Exception $e) {
+            Log::error('Date parsing failed in Payroll getData() Stage 1' . $e->getMessage(), [
+                    'validated' => $validated,
+                    'matches' => $matches,
+                    'trace' => $e->getTraceAsString(),
+                    'request' => $request->all()
+                ]);
 
-            // 1. Fetch internal project codes and 200 codes
+            $data = [
+                'tableData'                 => ApiResponse::error("Validation Failed" . $e->getMessage()),
+                'totalHours'                => ApiResponse::error("Validation Failed" . $e->getMessage()),
+                'totalOvertime'             => ApiResponse::error("Validation Failed" . $e->getMessage()),
+                'averageBillablePercentage' => ApiResponse::error("Validation Failed" . $e->getMessage()),
+            ];
+
+            return response()->json($data, 200);
+        }
+
+        // Stage 2: Shared Data Gathering
+        try {
+            // Gather data needed for aggregation pipeline
             $internalProjectCodes = Project::where('is_internal', true)->pluck('projectcode')->toArray();
             $codes_200 = GlobalDoc::where('name', "200_codes")->first()?->{'200_codes'} ?? ['Parental Leave', 'Jury Duty', 'Funeral', 'Bereavement', 'FMLA', 'UTO'];
             $allSpecialCEGSubProjects = array_unique(array_merge(['PTO', 'Holiday'], $codes_200));
@@ -146,11 +177,9 @@ class PayrollController extends Controller
                 $userMatchFilter['wage_type'] = ['$in' => $selectedWageTypes];
             }
 
-
             $pipeline = [
                 // Stage 1: Filter Users FIRST.
                 // This ensures we don't waste time looking up hours for inactive users.
-                // This replaces the hardcoded { active: true } from the raw pipeline.
                 (!empty($userMatchFilter)) ? ['$match' => $userMatchFilter] : null,
 
                 // Stage 2: The "Left Join" Lookup.
@@ -187,8 +216,6 @@ class PayrollController extends Controller
                 ],
 
                 // Stage 4: Grouping & Calculation
-                // Note: Field references are slightly different because we started on the User object.
-                // (e.g., '$employee_number' is now at the root, not inside 'userInfo')
                 [
                     '$group' => [
                         '_id' => [
@@ -347,118 +374,153 @@ class PayrollController extends Controller
             $pipeline = array_values(array_filter($pipeline));
 
             // EXECUTION: IMPORTANT - Run this on the User model
-            $results = User::raw(function ($collection) use ($pipeline) {
+            $aggregatedHours = User::raw(function ($collection) use ($pipeline) {
                 return $collection->aggregate($pipeline);
             })->toArray();
+        }
+        catch (\Exception $e) {
+            Log::error('Error in Shared Data Gathering' . $e->getMessage(), [
+                    'trace' => $e->getTraceAsString(),
+                    'request' => $request->all()
+                ]);
 
-            $summaryRows = $this->getSummaryRows($results);
+            $aggregatedHours = ApiResponse::error($e->getMessage());
+        }
 
-        // Initialize totals
-            $totalCompanyHours = 0;
-            $totalCompanyOvertime = 0;
-            $totalBillableHoursOfBillableStaff = 0; // For weighted average
-            $totalHoursOfBillableStaff = 0;         // For weighted average
+        // Stage 3: Individual Components
 
-            foreach ($results as $row) {
-                // Sum company-wide totals regardless of billable status
-                $totalCompanyHours += $row['total_hours'];
-                $totalCompanyOvertime += $row['overtime'];
+        // Table Data
+        try {
+            if ($aggregatedHours instanceof ApiResponse) {
+                $tableDataResponse = $aggregatedHours;
+            }
+            else {
+                // we already have the main tableData from $aggregatedHours, so now we just calculate summaryRows data
+                $groupedByType = [];
+            
+                foreach ($aggregatedHours as $item) {
+                    // Default to 'Other' if wage_type is missing, though your pipeline ensures it exists
+                    $type = $item['wage_type'] ?? 'Other';
+                    
+                    if (!isset($groupedByType[$type])) {
+                        $groupedByType[$type] = [
+                            'pto' => 0,
+                            'holiday' => 0,
+                            'other_200' => 0,
+                            'other_nb' => 0,
+                            'total_nb' => 0,
+                            'billable' => 0,
+                            'total_hours' => 0,
+                            'overtime' => 0,
+                        ];
+                    }
 
-                // Only include billable staff in the average calculation
-                if (isset($row['expected_billable']) && $row['expected_billable']) {
-                    $totalBillableHoursOfBillableStaff += $row['billable'];
-                    $totalHoursOfBillableStaff += $row['total_hours'];
+                    $groupedByType[$type]['pto'] += $item['pto'];
+                    $groupedByType[$type]['holiday'] += $item['holiday'];
+                    $groupedByType[$type]['other_200'] += $item['other_200'];
+                    $groupedByType[$type]['other_nb'] += $item['other_nb'];
+                    $groupedByType[$type]['total_nb'] += $item['total_nb'];
+                    $groupedByType[$type]['billable'] += $item['billable'];
+                    $groupedByType[$type]['total_hours'] += $item['total_hours'];
+                    $groupedByType[$type]['overtime'] += $item['overtime'];
                 }
+
+                $summaryRows = [];
+
+                // 2. Build the final summary row structure
+                foreach ($groupedByType as $type => $totals) {
+                    // Calculate weighted billable percentage (Sum of Billable / Sum of Total Hours)
+                    $weightedBillablePct = ($totals['total_hours'] > 0) 
+                        ? ($totals['billable'] / $totals['total_hours']) * 100 
+                        : 0;
+
+                    $summaryRows[] = [
+                        'id' => 'summary-' . $type,
+                        'employee_name' => ucfirst($type) . ' Totals', // e.g., "Hourly Totals"
+                        'employee_id' => 'N/A',
+                        'expected_billable' => null,
+                        'wage_type' => $type,
+                        'pto' => $totals['pto'],
+                        'holiday' => $totals['holiday'],
+                        'other_200' => $totals['other_200'],
+                        'other_nb' => $totals['other_nb'],
+                        'total_nb' => $totals['total_nb'],
+                        'billable' => $totals['billable'],
+                        'total_hours' => $totals['total_hours'],
+                        'billable_percentage' => round($weightedBillablePct, 2),
+                        'overtime' => $totals['overtime'],
+                        'grouped' => true // Distinct flag for frontend styling
+                    ];
+                }
+
+                $tableData = ["tableData" => $aggregatedHours, "summaryRows" => $summaryRows, "payPeriodIdentifier" => $validated['dateRangeDropdown']];
+                $tableDataResponse = ApiResponse::success($tableData);
             }
-
-            // Calculate the weighted average billable percentage
-            $averageBillablePercentage = ($totalHoursOfBillableStaff > 0)
-                ? ($totalBillableHoursOfBillableStaff / $totalHoursOfBillableStaff) * 100
-                : 0;
-
-            // Prepare the response
-            $response = [
-                'tableData' => $results,
-                'totalHours' => $totalCompanyHours,
-                'totalOvertime' => $totalCompanyOvertime,
-                'averageBillablePercentage' => round($averageBillablePercentage, 2),
-                'payPeriodIdentifier' => $validated['dateRangeDropdown'],
-                'summaryRows' => $summaryRows
-            ];
-
-            return response()->json($response);
-
-        } catch (\Exception $e) {
-            Log::error('PayrollController getData error: ' . $e->getMessage(), [
-                'trace' => $e->getTraceAsString(),
-                'request' => $request->all()
-            ]);
-            
-            return response()->json([
-                'error' => $e->getMessage()
-            ], 500);
         }
-    }
-
-    private function getSummaryRows($results) {
-        // 1. Accumulate totals by wage_type
-        $groupedByType = [];
+        catch (\Exception $e) {
+            Log::error('Error in calculating Summary Rows for tableData' . $e->getMessage(), [
+                    'trace' => $e->getTraceAsString(),
+                    'request' => $request->all()
+                ]);
+            $tableDataResponse = ApiResponse::error("Error in calculating summary rows");
+        }
         
-        foreach ($results as $item) {
-            // Default to 'Other' if wage_type is missing, though your pipeline ensures it exists
-            $type = $item['wage_type'] ?? 'Other';
-            
-            if (!isset($groupedByType[$type])) {
-                $groupedByType[$type] = [
-                    'pto' => 0,
-                    'holiday' => 0,
-                    'other_200' => 0,
-                    'other_nb' => 0,
-                    'total_nb' => 0,
-                    'billable' => 0,
-                    'total_hours' => 0,
-                    'overtime' => 0,
-                ];
+        // simple stat tiles
+        try {
+            if ($aggregatedHours instanceof ApiResponse) {
+                $totalCompanyHoursResponse = $aggregatedHours;
+                $totalCompanyOvertimeResponse = $aggregatedHours;
+                $averageBillablePercentageResponse = $aggregatedHours;
             }
+            else {
+                $totalCompanyHours = 0;
+                $totalCompanyOvertime = 0;
+                $totalBillableHoursOfBillableStaff = 0; // For weighted average
+                $totalHoursOfBillableStaff = 0;         // For weighted average
 
-            $groupedByType[$type]['pto'] += $item['pto'];
-            $groupedByType[$type]['holiday'] += $item['holiday'];
-            $groupedByType[$type]['other_200'] += $item['other_200'];
-            $groupedByType[$type]['other_nb'] += $item['other_nb'];
-            $groupedByType[$type]['total_nb'] += $item['total_nb'];
-            $groupedByType[$type]['billable'] += $item['billable'];
-            $groupedByType[$type]['total_hours'] += $item['total_hours'];
-            $groupedByType[$type]['overtime'] += $item['overtime'];
+                foreach ($aggregatedHours as $row) {
+                    // Sum company-wide totals regardless of billable status
+                    $totalCompanyHours += $row['total_hours'];
+                    $totalCompanyOvertime += $row['overtime'];
+
+                    // Only include billable staff in the average calculation
+                    if (isset($row['expected_billable']) && $row['expected_billable']) {
+                        $totalBillableHoursOfBillableStaff += $row['billable'];
+                        $totalHoursOfBillableStaff += $row['total_hours'];
+                    }
+                }
+
+                // Calculate the weighted average billable percentage
+                $averageBillablePercentage = ($totalHoursOfBillableStaff > 0)
+                    ? ($totalBillableHoursOfBillableStaff / $totalHoursOfBillableStaff) * 100
+                    : 0;
+                $averageBillablePercentage = round($averageBillablePercentage, 2);
+
+                $totalCompanyHoursResponse = ApiResponse::success($totalCompanyHours);
+                $totalCompanyOvertimeResponse = ApiResponse::success($totalCompanyOvertime);
+                $averageBillablePercentageResponse = ApiResponse::success($averageBillablePercentage);
+            }
         }
-
-        $summaryRows = [];
-
-        // 2. Build the final summary row structure
-        foreach ($groupedByType as $type => $totals) {
-            // Calculate weighted billable percentage (Sum of Billable / Sum of Total Hours)
-            $weightedBillablePct = ($totals['total_hours'] > 0) 
-                ? ($totals['billable'] / $totals['total_hours']) * 100 
-                : 0;
-
-            $summaryRows[] = [
-                'id' => 'summary-' . $type,
-                'employee_name' => ucfirst($type) . ' Totals', // e.g., "Hourly Totals"
-                'employee_id' => 'N/A',
-                'expected_billable' => null,
-                'wage_type' => $type,
-                'pto' => $totals['pto'],
-                'holiday' => $totals['holiday'],
-                'other_200' => $totals['other_200'],
-                'other_nb' => $totals['other_nb'],
-                'total_nb' => $totals['total_nb'],
-                'billable' => $totals['billable'],
-                'total_hours' => $totals['total_hours'],
-                'billable_percentage' => round($weightedBillablePct, 2),
-                'overtime' => $totals['overtime'],
-                'grouped' => true // Distinct flag for frontend styling
-            ];
+        catch (\Exception $e) {
+            Log::error('Error in calculating stat tiles' . $e->getMessage(), [
+                    'trace' => $e->getTraceAsString(),
+                    'request' => $request->all()
+                ]);
+            
+            $totalCompanyHoursResponse = ApiResponse::error($e->getMessage());
+            $totalCompanyOvertimeResponse = ApiResponse::error($e->getMessage());
+            $averageBillablePercentageResponse = ApiResponse::error($e->getMessage());
         }
-        return $summaryRows;
+        
+
+        // Prepare the response
+        $response = [
+            'tableData' => $tableDataResponse,
+            'totalHours' => $totalCompanyHoursResponse,
+            'totalOvertime' => $totalCompanyOvertimeResponse,
+            'averageBillablePercentage' => $averageBillablePercentageResponse
+        ];
+
+        return response()->json($response, 200);
     }
-
 }

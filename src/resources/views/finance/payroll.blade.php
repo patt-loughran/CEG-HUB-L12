@@ -29,7 +29,7 @@
                 format="hours"
                 iconClasses="bg-blue-100 text-blue-700"
                 iconName="simpleClock"
-                eventPrefix="payroll-data"
+                eventPrefix="payroll"
             />
             
             <x-general.simple-stat 
@@ -38,7 +38,7 @@
                 format="percentage"
                 iconClasses="bg-green-100 text-green-700"
                 iconName="pieChart"
-                eventPrefix="payroll-data"
+                eventPrefix="payroll"
             />
 
             <x-general.simple-stat 
@@ -47,7 +47,7 @@
                 format="hours"
                 iconClasses="bg-orange-100 text-orange-700"
                 iconName="warning"
-                eventPrefix="payroll-data"
+                eventPrefix="payroll"
             />
 
         </div>
@@ -58,10 +58,10 @@
     </div>
 </div>
 
-{{-- Add this - the modal component --}}
+{{-- modal export component --}}
 <x-general.export-table />
 
-{{-- This component is invisible but does all the work --}}
+{{-- This component is invisible --}}
 <x-finance.payroll.data-bridge />
 
 </body>

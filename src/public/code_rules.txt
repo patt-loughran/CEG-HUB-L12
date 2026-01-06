@@ -26,454 +26,466 @@ General:
 
             Blade Components:
                 - Blade components handle all user interactions and state changes using Alpine.JS. We do NOT use LiveWire. The components can be of three classes: User Input (visual), Data Bridge (headless), and Display (visual). Note, this is for all non-custom pages.
-
-                    User Input Components: These components contain HTML elements for user input, e.g. <input> or <select>. They may also contain custom input components found at src/resources/views/components/inputs
-                    - Modifying these inputs and/or hitting a "submit" button will result in a custom event being dispatched to the data bridge, indicating we need to fetch new data for the display components.
-                    - There are two main layouts for a User Input component. Either custom events are triggered on change of the input elements and are sent as soon as a change is made, or there is a "submit" button that sends the state of the neccessary input elements.
-                    - Usually there is just one User Input Component, but there can be mutliple depending on the page.
-                    - Sometimes, a User Input Component can be a child of a display component. When this is the case we will still define the user input component in its own file and will use a slot for the user input component within the display component.
-
-                    Data-Bridge Component: A "headless" (non-visual) Blade component listens for custom events from the User Input Component.
-                        - The Data-Bridge component is the single source of truth for the state of an asynchronous data request. It is responsible for telling dynamic display components not only when data has arrived or an error has occurred, but also when a request has started.
-
-                        Its responsibilities are to:
-                        - Receive an event from the User Input Component.
-                        - Send a POST request (using the fetch API) to the controller's getData() method (or a more specifically named getData function if there are multiple).
-                        - Receive the new data or any errors from the controller.
-                        - Dispatch the received data or errors to dynamic Display Components using a clear, three-event system:
-                            - [feature]-data-loading: The data-bridge MUST dispatch this event synchronously immediately after receiving a request to fetch data, and before the await fetch() call. This signals all listening display components to enter their loading state (e.g., show a skeleton loader).
-                            - [feature]-data-updated: Upon a successful fetch response, the data-bridge MUST dispatch this event with the new data as the payload.
-                            - [feature]-data-error: If the fetch fails or the response is not ok, the data-bridge MUST dispatch this event with an error message in the payload.
-
-                    Display Components: These are "dumb" components that listen for events and data from the data-bridge or the initial load.
-                        - There are two main types of display components, static and dynamic.
-                        - static display components never need to be updated after initial page load, so they will recieve their data as props from the initial page load and will not be connnected to the databridge.
-                        - dynamic display components change as data is loaded from the data-bridge. They are NEVER pre-loaded on initial load. We always get the data from the data bridge. Initial load data is triggered by a manual firing of a user input event.
-
-                        general display component rules:
-                            - Display Components MUST have a visual state for each of these three conditions: a loading state (e.g., skeleton), a data-display state, and an error state.
-                            - The init() method of a display component SHOULD set isLoading to true to handle the initial page load, ensuring a loading skeleton is shown while the very first fetch is in progress.
-
-                        static display component rules:
-                            - Still need a loading state even though it will only show briefly on initial page load.
-
-                        dynamic display component rules:
-                            - Upon receiving a [feature]-data-loading event, they display a loading skeleton.
-                            - Upon receiving a [feature]-data-updated event, they update their own state and appearance with the new data.
-                            - Upon receiving a [feature]-data-error event, they update their own state and appearance with the error message.
-                            - Display components do not come preloaded with default data, but rather, rely on a manual firing of an event from the User Input Component at the end of its init function after the default values for the User Input Component have been set.
-
-                            Example dynamic display component Event Flow:
-                                1) User clicks a filter in the User Input Component, which dispatches a custom event called [feature]-change.
-                                2) Data-bridge catches [feature]-change.
-                                3) Data-bridge immediately dispatches [feature]-data-loading.
-                                4) All dynamic display components listening for events from the data bridge catch [feature]-data-loading and show their skeletons.
-                                5) The fetch request completes.
-                                6) Data-bridge dispatches either [feature]-data-updated or [feature]-data-error.
-                                7) All display components catch the final event, hide their skeletons, and show the new content (or an error message).
-
-Controller Specific Rules:
-    The functions within a controller must be organized in the following order:
-        1) index(): This is always the first function. It is called by a GET request to handle the initial page load. It retrieves all necessary data for the initial view and returns the view with that data.
-        2) Index Helper Functions: Any functions called by index() should be placed directly below it, in the order they are called.
-        3) getData(): This function is placed below all index() related functions. It is called by fetch requests from the frontend to retrieve new data based on user interactions.
-            - Note for getData: As stated in the general section, usually, there will be just one getData function as most of the time, the data that the display components need is overlapping. Should two or more display components need completely isolated data, there will be mutliple getData functions that each have a slightly different name that specifies the data they are getting.
-
-    Database Queries:
-        - Use Raw MongoDB Aggregation Pipelines: For database queries within a getData function, raw MongoDB aggregation pipelines are required unless the query is a simple match. This is for performance reasons.
-        - Date/Time Objects: When using raw aggregation pipelines, PHP DateTime or Carbon objects are not compatible. They must be converted to MongoDB UTCDateTime objects using the following format:
-            new \MongoDB\BSON\UTCDateTime($date->getTimestamp() * 1000)
-        - Pipelines should be written to be as efficient as possible in terms of documents searched in order to reduce the time it takes for them to complete. For more information on this, please reference the MongoDB section of this guide.
-        - When retrieving documents from MongoDB using an Eloquent model, the Laravel MongoDB driver automatically inspects the data and casts any BSON UTCDateTime fields directly into PHP Carbon objects. You should always treat these fields as Carbon objects immediately after retrieval.
-    Data Processing (Server vs. Client):
-        - A key principle is to balance server-side processing with minimizing data transfer size. The following rules apply:
-            - Server-Side Computations: All calculations, such as totals, averages, or other aggregations, must be performed by the server-side controller. This ensures that the client receives pre-computed values and does not have to perform these calculations itself.
-            - Eliminate Redundant Data: Avoid sending data that the client can easily derive on its own from the information already provided. For example, if the client can filter a list of data returned for one display component to get a specific subset needed for a different display component, do not send a separate, pre-filtered version of that same list. This minimizes the amount of data transferred.
-
-        Example Scenario:
-            A payroll page returns a table of employee hours. It also has display components for:
-                - Total hours for all employees.
-                - Total overtime hours for all employees.
-                - Average billable percentage for all employee hours.
-                - A list of employees with fewer than 80 hours.
-
-            In this case, the controller's response would look like this:
-
-                $response = [
-                'tableData'     => $results,                          // from Mongo then processed
-                'totalHours'    => $totalCompanyHours,                // computed from processed $tableData or from raw data in the process of computing $tableData
-                'totalOvertime' => $totalCompanyOvertime,             // computed from processed $tableData or from raw data in the process of computing $tableData
-                ′averageBillablePercentage′ => $avgBillablePercentage // computed from processed $tableData or from raw data in the process of computing $tableData
-                // Notice there is no return variable here for the quick view list, as this can be directly derived from $tableData without any further computation.    
-                ];
-
-            The totalHours, totalOvertime, and averageBillablePercentage values are calculated in the controller because they require computation.
-            The list of employees with fewer than 80 hours is not returned as a separate variable. This list will be derived on the client side by filtering the tableData array, as no new computation is needed.
-
-            - When dealing with data that needs to be sorted, always sort initially in the Controller (Server) side, but know that the client may also need to do some sorting. Client sorting might need to happen for the following two reasons:
-                1) Some Display Components such as lists or tables might have mutliple columns by which you want data sorted. If this is the case, we will sort by whatever is the default view in the controller, and let the client sort when needed.
-                2) Multiple Display Components might need the same data, and have different default sorts. When this is the case, the larger/more important component will take precedence and have its default sort order sorted initially server side. An example of this is the payroll page. Both the payroll table (Primary/Main Display Component) and the pay-period-quick-list use the same data, but the payroll table default sort is alphabetical by employee name and the pay-period-quick-list default is total hours ascending. We give preference to the entire payroll table and sort alphabetically by employee name in the controller.   
     
-    Error Handeling:
-        - We will use try-catch blocks most of the time. We do not want to get too specific with these as it makes readability worse. In general, we use one try-catch block for all errors per each function. The only exception to this is if there is a specific error that we don't want to return an error to the page, but want to keep going to return the data.
-        - Assuming we do want to return the error, the catch block will always return an "error" with the message attached to be displayed in the display component. We will also always log the error.
-            Example:
-                } catch (\Exception $e) {
-                Log::error('PayrollController getData error: ' . $e->getMessage(), [
-                    'trace' => $e->getTraceAsString(),
-                    'request' => $request->all()
-                ]);
+                User Input Components: These components contain HTML elements for user input, e.g. <input> or <select>. They may also contain custom input components found at src/resources/views/components/inputs
+                - Modifying these inputs and/or hitting a "submit" button will result in a custom event being dispatched to the data bridge, indicating we need to fetch new data for a specific "Synchronous Group" or an independent display component (Synchronous Group of size 1).
+                - **Synchronous Group:** A collection of display components that logically update together based on the same user input filters.
+                - There are two main layouts for a User Input component. Either custom events are triggered on change of the input elements and are sent as soon as a change is made, or there is a "submit" button that sends the state of the neccessary input elements.
+                - Usually there is just one User Input Component, but there can be mutliple depending on the page. One User Input Component can be responsible for multiple Synchronous Groups. 
+                - A User Input component will send out one singular event for each unique synchronous group.
+                - Sometimes, a User Input Component will be a child of a display component. When this is the case we will still define the user input component in its own file and will use a slot for the user input component within the display component.
+
+                Data-Bridge Component: A "headless" (non-visual) Blade component listens for custom events from the User Input Component.
+                    - The Data-Bridge component is the single source of truth for the state of an asynchronous data request. It is responsible for telling dynamic display components not only when data has arrived or a fetch error has occurred, but also when a request has started.
+
+                    Its responsibilities are to:
+                    - Receive an event from the User Input Component.
+                    - Send a single POST request (using the fetch API) to the controller's getData() method for that specific synchronous group event.
+                    - Receive the response from the controller.
+                        - The controller should ALWAYS return a 200 OK status, even if specific components (or even all of them) failed to generate data.
+                        - The response payload is an associative array where keys are component names and values are `ApiResponse` objects containing `{ data: mixed, errors: mixed }`. Either data will be valid and errors will be null, or vice versa. NEVER will they both have null or something.
+                    - Dispatch the received data or errors to dynamic Display Components using a clear, three-event system:
+                        - [feature]-data-loading: The data-bridge MUST dispatch this event synchronously immediately after receiving a request to fetch data, and before the await fetch() call. This signals all listening display components to enter their loading state (e.g., show a skeleton loader).
+                        - [feature]-data-updated: Upon a successful fetch response (HTTP 200), the data-bridge MUST dispatch this event with the **entire** returned associative array as the payload.
+                        - [feature]-fetch-error: If the fetch fails at the network level (non-200 status or network timeout), the data-bridge MUST dispatch this event with an error message in the payload.
+
+                Display Components: These are "dumb" components that listen for events and data from the data-bridge or the initial load.
+                    - There are two main types of display components, static and dynamic.
+                    - static display components never need to be updated after initial page load, so they will recieve their data as props from the initial page load and will not be connnected to the databridge.
+                    - dynamic display components change as data is loaded from the data-bridge. They are NEVER pre-loaded on initial load. We always get the data from the data bridge. Initial load data is triggered by a manual firing of a user input event.
+
+                    general display component rules:
+                        - Display Components MUST have a visual state for each of these three conditions: a loading state (e.g., skeleton), a data-display state, and an error state.
+                        - The init() method of a display component SHOULD set isLoading to true to handle the initial page load, ensuring a loading skeleton is shown while the very first fetch is in progress.
+
+                    static display component rules:
+                        - Still need a loading state even though it will only show briefly on initial page load.
+
+                    dynamic display component rules:
+                        - Upon receiving a [feature]-data-loading event, they display a loading skeleton.
+                        - Upon receiving a [feature]-data-updated event:
+                            - The component must extract its specific data from the payload using its component name key.
+                            - It must check the `ApiResponse` structure:
+                                - If `errors` is not null, the component updates its own state and appearance to the error state using the provided error message.
+                                - If `errors` is null and `data` is present, the component updates its own state and appearance with the new data.
+                        - Upon receiving a [feature]-fetch-error event, they update their own state and appearance with the global error message.
+                        - Display components do not come preloaded with default data, but rather, rely on a manual firing of an event from the User Input Component at the end of its init function after the default values for the User Input Component have been set.
+
+                        Example dynamic display component Event Flow:
+                            1) User clicks a filter in the User Input Component, which dispatches a custom event called [feature]-change.
+                            2) Data-bridge catches [feature]-change.
+                            3) Data-bridge immediately dispatches [feature]-data-loading.
+                            4) All dynamic display components listening for events from the data bridge catch [feature]-data-loading and show their skeletons.
+                            5) The fetch request completes (should be with a 200 OK).
+                            6) Data-bridge dispatches either [feature]-data-updated (containing individual success/failures) or [feature]-fetch-error (network fail).
+                            7) All display components catch the final event.
+                                - If [feature]-data-updated: Each component checks its specific `ApiResponse` key. If successful, it hides the skeleton and shows content. If that specific component failed, it shows its error state.
+                                - If [feature]-fetch-error: All components hide skeletons and show their error state.
+
+        Controller Specific Rules:
+            The functions within a controller must be organized in the following order:
+                1) index(): This is always the first function. It is called by a GET request to handle the initial page load. It retrieves all necessary data for the initial view and returns the view with that data. This function's internals are wrapped in a try-catch block, and if there is an error, we return a 500 error page with a custom error message, as an error here is critical.
+                2) Index Helper Functions: Any functions called by index() should be placed directly below it, in the order they are called.
+                3) getData(): This function is placed below all index() related functions. It is called by fetch requests from the frontend to retrieve new data based on user interactions.
+                    - Note for getData: As stated in the general section, usually, there will be just one getData function per "Synchronous Group" of display components.
+                    - Structure of getData(): To support partial success and isolated failures, the getData function must follow a specific "Global Context, Local Execution" pattern consisting of three stages:
+                    - Stage 1 (Global Validation): Validate inputs and parse the variables recieved in the request to be used by later functions. If this fails, we return a global error payload (Every display component in the return associative array has an ApiResponse Error Object, explained below).
+                    - Stage 2 (Shared Data Gathering): Perform expensive queries (e.g., Raw MongoDB Aggregations) that are required by multiple display components. This is wrapped in its own try-catch block. If it fails, the error is caught and logged, but execution continues so independent components can still load.
+                        - If there is an error, the value for the variables set in the shared data gathering are set to an ApiResponse Error Object. Any component relying on these will check if this is the case, and if so, will set their own individual response object to the shared data gathering one, so it can relay the specific error.
+                    - Stage 3 (Individual Components): Calculate and format data for each specific display component. Use helper functions (defined below getData) for complex component logic.
+                    - Return Format:** The function ultimately returns a standard associative array where the keys are the component names and the values are `ApiResponse` objects (Success or Error). The HTTP status code should be 200, unless a catastrophic server failure occurs.
+            Database Queries:
+                - Use Raw MongoDB Aggregation Pipelines: For database queries within a getData function (usually Stage 2), raw MongoDB aggregation pipelines are required unless the query is a simple match. This is for performance reasons.
+                - Date/Time Objects: When using raw aggregation pipelines, PHP DateTime or Carbon objects are not compatible. They must be converted to MongoDB UTCDateTime objects using the following format:
+                    new \MongoDB\BSON\UTCDateTime($date->getTimestamp() * 1000)
+                - Pipelines should be written to be as efficient as possible in terms of documents searched in order to reduce the time it takes for them to complete. For more information on this, please reference the MongoDB section of this guide.
+                - When retrieving documents from MongoDB using an Eloquent model, the Laravel MongoDB driver automatically inspects the data and casts any BSON UTCDateTime fields directly into PHP Carbon objects. You should always treat these fields as Carbon objects immediately after retrieval.
+
+            Data Processing (Server vs. Client):
+                - A key principle is to balance server-side processing with minimizing data transfer size. The following rules apply:
+                    - Server-Side Computations: All calculations, such as totals, averages, or other aggregations, must be performed by the server-side controller. This ensures that the client receives pre-computed values and does not have to perform these calculations itself.
+                    - Eliminate Redundant Data: Avoid sending data that the client can easily derive on its own from the information already provided. For example, if the client can filter a list of data returned for one display component to get a specific subset needed for a different display component, do not send a separate, pre-filtered version of that same list. This minimizes the amount of data transferred.
+
+                Example Scenario:
+                    A payroll page returns a table of employee hours. It also has display components for:
+                        - Total hours for all employees.
+                        - Total overtime hours for all employees.
+                        - Average billable percentage for all employee hours.
+                        - A list of employees with fewer than 80 hours.
+
+                    In this case, the controller's response would look like this using the ApiResponse wrapper:
+
+                        $response = [
+                        'tableData'     => ApiResponse::success($results),                  // from Mongo then processed
+                        'totalHours'    => ApiResponse::success($totalCompanyHours),        // computed from processed $tableData
+                        'totalOvertime' => ApiResponse::error("Calculation Failed"),        // Example of a specific component failure
+                        'averageBillablePercentage' => ApiResponse::success($avgBillablePercentage)
+                        // Notice there is no return variable here for the quick view list, as this can be directly derived from $tableData without any further computation.    
+                        ];
+
+                    The totalHours, totalOvertime, and averageBillablePercentage values are calculated in the controller because they require computation.
+                    The list of employees with fewer than 80 hours is not returned as a separate variable. This list will be derived on the client side by filtering the tableData array, as no new computation is needed.
+
+                    - When dealing with data that needs to be sorted, always sort initially in the Controller (Server) side, but know that the client may also need to do some sorting. Client sorting might need to happen for the following two reasons:
+                        1) Some Display Components such as lists or tables might have mutliple columns by which you want data sorted. If this is the case, we will sort by whatever is the default view in the controller, and let the client sort when needed.
+                        2) Multiple Display Components might need the same data, and have different default sorts. When this is the case, the larger/more important component will take precedence and have its default sort order sorted initially server side. An example of this is the payroll page. Both the payroll table (Primary/Main Display Component) and the pay-period-quick-list use the same data, but the payroll table default sort is alphabetical by employee name and the pay-period-quick-list default is total hours ascending. We give preference to the entire payroll table and sort alphabetically by employee name in the controller.   
+
+            Error Handeling:
+                - We do not use a single "catch-all" block that returns a 500 error for the whole request. We strictly adhere to the `ApiResponse` structure to allow partial page loads.
+                - **Stage 1 (Validation) Errors:** If validation fails, we catch the exception and return a 200 OK response where *every* component key contains an `ApiResponse::error("Validation Failed")`.
+                - **Stage 2 (Shared Data) Errors:** If the shared data query fails, we catch and log the error. We assign the shared variable a failure state (or null). We DO NOT return immediately. We proceed to Stage 3.
+                - **Stage 3 (Component) Errors:** We wrap individual component logic in try-catch blocks.
+                    - If a component relies on Shared Data from Stage 2, it must check if that data is valid. If the shared data is missing/erroring, the component throws an exception (or returns an error).
+                    - The catch block for a component logs the error and returns `ApiResponse::error($msg)`.
+                    Example:
+                        try {
+                            // Logic for specific component
+                            return ApiResponse::success($data);
+                        } catch (\Exception $e) {
+                            Log::error('Component Calculation Error: ' . $e->getMessage());
+                            return ApiResponse::error("Unable to load data");
+                        }
+                - **Logging:** All exceptions, whether global or local, must be logged with the stack trace and request inputs to assist debugging.
+
+            General Controller Rules:
+                - Use Carbon for all date objects in the controller. Often one of our first steps is taking date strings sent in from the data-bridge and converting them to Carbon Objects to be used.
+        Alpine Rules:
+
+            General:
+                1) Do not define the Alpine object within the x-data, but instead, define it in a separate script tag at the bottom of the component file. The name of the function called should be the CamelCase path to the component file followed by the word "Logic". See the example below for the user input component of the payroll page for the finance team:
                 
-                return response()->json([
-                    'error' => $e->getMessage()
-                ], 500);
-            }
-    General Controller Rules:
-        - Use Carbon for all date objects in the controller. Often one of our first steps is taking date strings sent in from the data-bridge and converting them to Carbon Objects to be used.
-Alpine Rules:
+                <div x-data='financePayrollControlPanelLogic(@json($phpVarFromProps))'>
+                    ...
+                </div>
 
-    General:
-        1) Do not define the Alpine object within the x-data, but instead, define it in a separate script tag at the bottom of the component file. The name of the function called should be the CamelCase path to the component file followed by the word "Logic". See the example below for the user input component of the payroll page for the finance team:
-        
-        <div x-data='financePayrollControlPanelLogic(@json($phpVarFromProps))'>
-            ...
-        </div>
+                @push('scripts')
+                <script>
+                        function financePayrollCOntrolPanelLogic(dateRanges) {
+                        return {
+                        <Alpine Object vars and functions here>
+                    }
+                    }
+                </script>
+                @endpush
 
-        @push('scripts')
-        <script>
-                function financePayrollCOntrolPanelLogic(dateRanges) {
-                return {
-                <Alpine Object vars and functions here>
-            }
-            }
-        </script>
-        @endpush
+                2) Always use the full x-bind:attribute="<some JavaScript Expression here>" instead of :attribute="<some JavaScript Expression here>"
+                    - this is because In Laravel, we use the ":" character to pass PHP expressions to Blade Components as props, and having them both in there can feel confusing
 
-        2) Always use the full x-bind:attribute="<some JavaScript Expression here>" instead of :attribute="<some JavaScript Expression here>"
-            - this is because In Laravel, we use the ":" character to pass PHP expressions to Blade Components as props, and having them both in there can feel confusing
+                3) Always set any class/instance variables for the alpine object to null and then initialize them in the first part of the init() function
+                    Example:
+                        function financePayrollControlPanelLogic(dateRanges) {
+                            return {
+                                selectedYear:  null,
+                                selectedDateRange: null,
+                                activeFilters: null,
+                                isUpdating: null,
 
-        3) Always set any class/instance variables for the alpine object to null and then initialize them in the first part of the init() function
-            Example:
-                function financePayrollControlPanelLogic(dateRanges) {
-                    return {
-                        selectedYear:  null,
-                        selectedDateRange: null,
-                        activeFilters: null,
-                        isUpdating: null,
+                                init() {
+                                    // Initialize Instance Variables
+                                    this.selectedYear = new Date().getFullYear().toString();
+                                    this.selectedDateRange = this.getDateRangeOptions()[0] || null;
+                                    this.activeFilters = ["active"]
+                                    this.isUpdating = false;
+                                    ...
+                                }
+                            }
+                        }
+                4) When you are conditionally setting the TailWind classes of an html element using x-bind:class="", if possible use the ternary, operator. If not, use Object Syntax:
+                    - Example if ternary possible:
+                        x-bind:class="activeFilters.includes(filter) ? 'bg-slate-700 text-white font-semibold' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'"
 
+                    -Example if not possible:
+                        x-bind:class="{
+                            'bg-green-500 text-white': status === 'success',
+                            'bg-yellow-500 text-black': status === 'warning', 
+                            'bg-red-500 text-white': status === 'error',
+                            'bg-gray-500 text-white': status === 'pending'
+                            }"
+                5) When using <template> elements inside x-for blocks, if what is being populated needs to dynamically change, try to use just one template chunk with a function instead of multiple
+                    - Bad Example:
+                        <select class="col-span-3 w-full bg-slate-50 border">
+                            <template x-if="rangeMode === 'month'">
+                                <template x-for="month in monthsForSelectedYear" :key="month">
+                                    <option x-bind:value="month" x-text="month"></option>
+                                </template>
+                            </template>
+                            <template x-if="rangeMode === 'payPeriod'">
+                                <template x-for="pp in payPeriodsForSelectedYear" :key="pp">
+                                    <option x-bind:value="pp" x-text="pp"></option>
+                                </template>
+                            </template>
+                        </select>
+                        ...
+                        <script>
+                            function financePayrollControlPanelLogic(dateRanges) {
+                            return {
+                                selectedYear: null,
+                                rangeMode: null,
+
+                                init() {
+                                    this.selectedYear = new Date().getFullYear().toString();
+                                    this.rangeMode = "payPeriod";
+                                },
+                                getPayPeriodsForSelectedYear() {
+                                    return dateRanges[this.selectedYear]?.payPeriods || [];
+                                },
+
+                                getMonthsForSelectedYear() {
+                                    return dateRanges[this.selectedYear]?.months || [];
+                                }
+                            }
+                            }
+                        <script>
+                    
+                    - Good Example:
+                        <select class="col-span-3 w-full bg-slate-50 border">
+                            <template x-for="option in getDateRangeOptions()" :key="option">
+                                <option x-bind:value="option" x-text="option"></option>
+                            </template>
+                        </select>
+                        ...
+                        <script>
+                            function financePayrollControlPanelLogic(dateRanges) {
+                            return {
+                                selectedYear: null,
+                                rangeMode: null,
+
+                                init() {
+                                    this.selectedYear = new Date().getFullYear().toString();
+                                    this.rangeMode = "payPeriod";
+                                },
+
+                                getDateRangeOptions() {
+                                    if (this.rangeMode === 'month')
+                                        return dateRanges[this.selectedYear]?.months || [];
+
+                                    else if (this.rangeMode === 'payPeriod')
+                                        return dateRanges[this.selectedYear]?.payPeriods || [];
+                                },
+                            }
+                            }
+                        <script>
+
+                6) When calling a function defined in the Alpine Object, always call it with the "()" at the end of the function name to signify it is a function. This also means that we do NOT use the "get" keyword to name a getter function.
+                    - Bad Example:
+                        <select class="col-span-3 w-full bg-slate-50 border">
+                            <template x-for="option in dateRangeOptions" :key="option"> 
+                                <option x-bind:value="option" x-text="option"></option>
+                            </template>
+                        </select>
+                        ...
+                        <script>
+                            function financePayrollControlPanelLogic(dateRanges) {
+                            return {
+                                selectedYear: null,
+                                rangeMode: null,
+
+                                init() {
+                                    this.selectedYear = new Date().getFullYear().toString();
+                                    this.rangeMode = "payPeriod";
+                                },
+
+                                get dateRangeOptions() {
+                                    if (this.rangeMode === 'month')
+                                        return dateRanges[this.selectedYear]?.months || [];
+
+                                    else if (this.rangeMode === 'payPeriod')
+                                        return dateRanges[this.selectedYear]?.payPeriods || [];
+                                },
+                            }
+                            }
+                        <script>
+
+                    - Good Example:
+                        <select class="col-span-3 w-full bg-slate-50 border">
+                            <template x-for="option in getDateRangeOptions()" :key="option"> 
+                                <option x-bind:value="option" x-text="option"></option>
+                            </template>
+                        </select>
+                        ...
+                        <script>
+                            function financePayrollControlPanelLogic(dateRanges) {
+                            return {
+                                selectedYear: null,
+                                rangeMode: null,
+
+                                init() {
+                                    this.selectedYear = new Date().getFullYear().toString();
+                                    this.rangeMode = "payPeriod";
+                                },
+
+                                getDateRangeOptions() {
+                                    if (this.rangeMode === 'month')
+                                        return dateRanges[this.selectedYear]?.months || [];
+
+                                    else if (this.rangeMode === 'payPeriod')
+                                        return dateRanges[this.selectedYear]?.payPeriods || [];
+                                },
+                            }
+                            }
+                        <script>
+
+                7) Pass Server-Side Data Securely with @json for the initial load
+                    - Always use the @json Blade directive to pass PHP variables (especially arrays and objects) into your Alpine component's data for the initial load. These variables will almost always be coming from the parent blade view, passed in via props, that is instantiating the component. The parent blade view got the variable from the Controller
+                    
+                8) Laravel requires csrf tokens in fetch requests, so we must store them in a meta header so we can later include them in the fetch.
+
+            User Input Component Implementation Rules:
+                1) When defining the Alpine function for the User Input Object, the different sections should be in the following order:
+                    @push('scripts')
+                    <script>
+                            function financeControlPanelLogic(dateRanges) {
+                            return {
+                            1)Class/Instance Variables set to null
+                            2)init() {
+                                2a)initialize class/instance variables
+                                2b)define watchers
+                                }
+                            3)otherFunctions()
+                            4)dispatchChangeEvent()
+                            
+                        }
+                        }
+                    </script>
+                    @endpush
+
+                2) at the end of the init function in the User Input Component, manually dispatch an initial event to load the default data for all the display components. The display components should always get their default data from an initial dispatch, and not pre-loaded from the controller somehow. 
+                    - This must be done using nextTick to ensure the display components are ready.
+                    Good example:
                         init() {
                             // Initialize Instance Variables
                             this.selectedYear = new Date().getFullYear().toString();
                             this.selectedDateRange = this.getDateRangeOptions()[0] || null;
                             this.activeFilters = ["active"]
                             this.isUpdating = false;
-                            ...
+
+                            // Set up watchers //
+
+                            // selectedYear Watcher
+                            this.$watch('selectedYear', () => {
+                                this.isUpdating = true;
+                                const newOptions = this.getDateRangeOptions();
+                                this.selectedDateRange = newOptions[0] || null;
+                                this.dispatchChangeEvent();
+                                this.$nextTick(() => {
+                                    this.isUpdating = false;
+                                });
+                            });
+
+                            // selectedDateRange Watcher   
+                            this.$watch('selectedDateRange', () => {
+                                if (this.isUpdating) return; 
+
+                                this.dispatchChangeEvent()
+                            });
+                            
+                            // activeFilters Watcher 
+                            this.$watch('activeFilters', () => this.dispatchChangeEvent());
+
+                            // Fire initial dispatch event with default values
+                            this.$nextTick(() => {
+                                this.dispatchChangeEvent();
+                            });
                         }
-                    }
-                }
-        4) When you are conditionally setting the TailWind classes of an html element using x-bind:class="", if possible use the ternary, operator. If not, use Object Syntax:
-            - Example if ternary possible:
-                x-bind:class="activeFilters.includes(filter) ? 'bg-slate-700 text-white font-semibold' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'"
-
-            -Example if not possible:
-                x-bind:class="{
-                    'bg-green-500 text-white': status === 'success',
-                    'bg-yellow-500 text-black': status === 'warning', 
-                    'bg-red-500 text-white': status === 'error',
-                    'bg-gray-500 text-white': status === 'pending'
-                    }"
-        5) When using <template> elements inside x-for blocks, if what is being populated needs to dynamically change, try to use just one template chunk with a function instead of multiple
-            - Bad Example:
-                <select class="col-span-3 w-full bg-slate-50 border">
-                    <template x-if="rangeMode === 'month'">
-                        <template x-for="month in monthsForSelectedYear" :key="month">
-                            <option x-bind:value="month" x-text="month"></option>
-                        </template>
-                    </template>
-                    <template x-if="rangeMode === 'payPeriod'">
-                        <template x-for="pp in payPeriodsForSelectedYear" :key="pp">
-                            <option x-bind:value="pp" x-text="pp"></option>
-                        </template>
-                    </template>
-                </select>
-                ...
-                <script>
-                    function financePayrollControlPanelLogic(dateRanges) {
-                    return {
-                        selectedYear: null,
-                        rangeMode: null,
-
-                        init() {
-                            this.selectedYear = new Date().getFullYear().toString();
-                            this.rangeMode = "payPeriod";
-                        },
-                        getPayPeriodsForSelectedYear() {
-                            return dateRanges[this.selectedYear]?.payPeriods || [];
-                        },
-
-                        getMonthsForSelectedYear() {
-                            return dateRanges[this.selectedYear]?.months || [];
-                        }
-                    }
-                    }
-                <script>
-            
-            - Good Example:
-                <select class="col-span-3 w-full bg-slate-50 border">
-                    <template x-for="option in getDateRangeOptions()" :key="option">
-                        <option x-bind:value="option" x-text="option"></option>
-                    </template>
-                </select>
-                ...
-                <script>
-                    function financePayrollControlPanelLogic(dateRanges) {
-                    return {
-                        selectedYear: null,
-                        rangeMode: null,
-
-                        init() {
-                            this.selectedYear = new Date().getFullYear().toString();
-                            this.rangeMode = "payPeriod";
-                        },
-
-                        getDateRangeOptions() {
-                            if (this.rangeMode === 'month')
-                                return dateRanges[this.selectedYear]?.months || [];
-
-                            else if (this.rangeMode === 'payPeriod')
-                                return dateRanges[this.selectedYear]?.payPeriods || [];
-                        },
-                    }
-                    }
-                <script>
-
-        6) When calling a function defined in the Alpine Object, always call it with the "()" at the end of the function name to signify it is a function. This also means that we do NOT use the "get" keyword to name a getter function.
-            - Bad Example:
-                <select class="col-span-3 w-full bg-slate-50 border">
-                    <template x-for="option in dateRangeOptions" :key="option"> 
-                        <option x-bind:value="option" x-text="option"></option>
-                    </template>
-                </select>
-                ...
-                <script>
-                    function financePayrollControlPanelLogic(dateRanges) {
-                    return {
-                        selectedYear: null,
-                        rangeMode: null,
-
-                        init() {
-                            this.selectedYear = new Date().getFullYear().toString();
-                            this.rangeMode = "payPeriod";
-                        },
-
-                        get dateRangeOptions() {
-                            if (this.rangeMode === 'month')
-                                return dateRanges[this.selectedYear]?.months || [];
-
-                            else if (this.rangeMode === 'payPeriod')
-                                return dateRanges[this.selectedYear]?.payPeriods || [];
-                        },
-                    }
-                    }
-                <script>
-
-            - Good Example:
-                <select class="col-span-3 w-full bg-slate-50 border">
-                    <template x-for="option in getDateRangeOptions()" :key="option"> 
-                        <option x-bind:value="option" x-text="option"></option>
-                    </template>
-                </select>
-                ...
-                <script>
-                    function financePayrollControlPanelLogic(dateRanges) {
-                    return {
-                        selectedYear: null,
-                        rangeMode: null,
-
-                        init() {
-                            this.selectedYear = new Date().getFullYear().toString();
-                            this.rangeMode = "payPeriod";
-                        },
-
-                        getDateRangeOptions() {
-                            if (this.rangeMode === 'month')
-                                return dateRanges[this.selectedYear]?.months || [];
-
-                            else if (this.rangeMode === 'payPeriod')
-                                return dateRanges[this.selectedYear]?.payPeriods || [];
-                        },
-                    }
-                    }
-                <script>
-
-        7) Pass Server-Side Data Securely with @json for the initial load
-            - Always use the @json Blade directive to pass PHP variables (especially arrays and objects) into your Alpine component's data for the initial load. These variables will almost always be coming from the parent blade view, passed in via props, that is instantiating the component. The parent blade view got the variable from the Controller
-            
-        8) Laravel requires csrf tokens in fetch requests, so we must store them in a meta header so we can later include them in the fetch.
-
-    User Input Component:
-        1) When defining the Alpine function for the User Input Object, the different sections should be in the following order:
-            @push('scripts')
-            <script>
-                    function financeControlPanelLogic(dateRanges) {
-                    return {
-                    1)Class/Instance Variables set to null
-                    2)init() {
-                        2a)initialize class/instance variables
-                        2b)define watchers
-                        }
-                    3)otherFunctions()
-                    4)dispatchChangeEvent()
-                    
-                }
-                }
-            </script>
-            @endpush
-
-        2) at the end of the init function in the User Input Component, manually dispatch an initial event to load the default data for all the display components. The display components should always get their default data from an initial dispatch, and not pre-loaded from the controller somehow. 
-            - This must be done using nextTick to ensure the display components are ready.
-            Good example:
-                init() {
-                    // Initialize Instance Variables
-                    this.selectedYear = new Date().getFullYear().toString();
-                    this.selectedDateRange = this.getDateRangeOptions()[0] || null;
-                    this.activeFilters = ["active"]
-                    this.isUpdating = false;
-
-                    // Set up watchers //
-
-                    // selectedYear Watcher
-                    this.$watch('selectedYear', () => {
-                        this.isUpdating = true;
-                        const newOptions = this.getDateRangeOptions();
-                        this.selectedDateRange = newOptions[0] || null;
-                        this.dispatchChangeEvent();
-                        this.$nextTick(() => {
-                            this.isUpdating = false;
-                        });
-                    });
-
-                    // selectedDateRange Watcher   
-                    this.$watch('selectedDateRange', () => {
-                        if (this.isUpdating) return; 
-
-                        this.dispatchChangeEvent()
-                    });
-                    
-                    // activeFilters Watcher 
-                    this.$watch('activeFilters', () => this.dispatchChangeEvent());
-
-                    // Fire initial dispatch event with default values
-                    this.$nextTick(() => {
-                        this.dispatchChangeEvent();
-                    });
-                }
-        3) Use a Centralized Dispatch Function for Emitting Events from the user-input component
-            - All component events fired with $dispatch should be wrapped in a dedicated function, typically named dispatchChangeEvent(). This function should be responsible for structuring the event payload.
-            - The exception to this rule is when our page has isolated display components that do not get their data at the same time
-            - Bad Example:
-                // Multiple dispatch calls scattered in the code
-                this.$watch('rangeMode', () => {
-                        // ... logic ...
-                        this.$dispatch('finance-panel-change', {
-                            timeGranularity: this.rangeMode,
-                            year: this.selectedYear,
-                            dateRangeDropdown: this.selectedDateRange,
-                            activeFilters: this.activeFilters
-                        });
-                });
-
-                this.$watch('activeFilters', () => {
-                        // ... logic ...
-                        this.$dispatch('finance-panel-change', {
-                            timeGranularity: this.rangeMode,
-                            year: this.selectedYear,
-                            dateRangeDropdown: this.selectedDateRange,
-                            activeFilters: this.activeFilters
-                        });
-                });
-
-            - Good Example:
-                // All watchers and methods call a single dispatch function
-                init() {
+                3) Use a Centralized Dispatch Function for Emitting Events from the user-input component
+                    - All component events fired with $dispatch should be wrapped in a dedicated function, typically named dispatchChangeEvent(). This function should be responsible for structuring the event payload.
+                    - Bad Example:
+                        // Multiple dispatch calls scattered in the code
                         this.$watch('rangeMode', () => {
-                            // ... logic ...
-                            this.dispatchChangeEvent();
+                                // ... logic ...
+                                this.$dispatch('finance-panel-change', {
+                                    timeGranularity: this.rangeMode,
+                                    year: this.selectedYear,
+                                    dateRangeDropdown: this.selectedDateRange,
+                                    activeFilters: this.activeFilters
+                                });
                         });
-                
-                        this.$watch('activeFilters', () => this.dispatchChangeEvent());
-                },
 
-                dispatchChangeEvent() {
-                        this.$dispatch('finance-panel-change', {
-                            timeGranularity: this.rangeMode,
-                            year: this.selectedYear,
-                            dateRangeDropdown: this.selectedDateRange,
-                            activeFilters: this.activeFilters
+                        this.$watch('activeFilters', () => {
+                                // ... logic ...
+                                this.$dispatch('finance-panel-change', {
+                                    timeGranularity: this.rangeMode,
+                                    year: this.selectedYear,
+                                    dateRangeDropdown: this.selectedDateRange,
+                                    activeFilters: this.activeFilters
+                                });
                         });
-                },
 
-         4) Safely Manage Watcher Side Effects with State Flags
-            - When a watcher ($watch) modifies a reactive property that is itself being watched, use a boolean state flag (e.g., isUpdating, isLoading) to prevent infinite loops or unintended watcher execution. This will often arise when changing state of an element inside a component changes the state of another element inside the same component, and both have watchers that send out external events. 
-            - Bad Example:
-                // Bad Example - No flags, causes infinite loops and unpredictable behavior
-                init() {
-                    // This watcher triggers when selectedYear changes
-                    this.$watch('selectedYear', () => {
-                        const newOptions = this.getDateRangeOptions();
-                        this.selectedDateRange = newOptions[0] || null; // This triggers the watcher below!
-                        this.dispatchChangeEvent();
-                    });
-                    
-                    // This watcher triggers when selectedDateRange changes
-                    this.$watch('selectedDateRange', () => {
-                        this.dispatchChangeEvent(); // This runs even during programmatic updates
+                    - Good Example:
+                        // All watchers and methods call a single dispatch function
+                        init() {
+                                this.$watch('rangeMode', () => {
+                                    // ... logic ...
+                                    this.dispatchChangeEvent();
+                                });
                         
-                        // Even worse - if this watcher also modified selectedYear:
-                        // this.selectedYear = someNewValue; // Would create an infinite loop!
-                    });
-                }
-            - Good Example:
-                init() {
-                    this.isUpdating = false;
+                                this.$watch('activeFilters', () => this.dispatchChangeEvent());
+                        },
 
-                    // This watcher TRIGGERS the controlled update
-                    this.$watch('selectedYear', () => {
-                        this.isUpdating = true; // 1. Set the flag
-                        
-                        const newOptions = this.getDateRangeOptions();
-                        this.selectedDateRange = newOptions[0] || null; // 2. This change would normally trigger the watcher below
-                        
-                        this.dispatchChangeEvent();
-                        
-                        this.$nextTick(() => {
-                            this.isUpdating = false; // 4. Reset the flag after the DOM updates
-                        });
-                    });
+                        dispatchChangeEvent() {
+                                this.$dispatch('finance-panel-change', {
+                                    timeGranularity: this.rangeMode,
+                                    year: this.selectedYear,
+                                    dateRangeDropdown: this.selectedDateRange,
+                                    activeFilters: this.activeFilters
+                                });
+                        },
 
-                    // This watcher RESPECTS the controlled update
-                    this.$watch('selectedDateRange', () => {
-                        // 3. The flag prevents this watcher's logic from running during the update
-                        if (this.isUpdating) return; 
+                4) Safely Manage Watcher Side Effects with State Flags
+                    - When a watcher ($watch) modifies a reactive property that is itself being watched, use a boolean state flag (e.g., isUpdating, isLoading) to prevent infinite loops or unintended watcher execution. This will often arise when changing state of an element inside a component changes the state of another element inside the same component, and both have watchers that send out external events. 
+                    - Bad Example:
+                        // Bad Example - No flags, causes infinite loops and unpredictable behavior
+                        init() {
+                            // This watcher triggers when selectedYear changes
+                            this.$watch('selectedYear', () => {
+                                const newOptions = this.getDateRangeOptions();
+                                this.selectedDateRange = newOptions[0] || null; // This triggers the watcher below!
+                                this.dispatchChangeEvent();
+                            });
+                            
+                            // This watcher triggers when selectedDateRange changes
+                            this.$watch('selectedDateRange', () => {
+                                this.dispatchChangeEvent(); // This runs even during programmatic updates
+                                
+                                // Even worse - if this watcher also modified selectedYear:
+                                // this.selectedYear = someNewValue; // Would create an infinite loop!
+                            });
+                        }
+                    - Good Example:
+                        init() {
+                            this.isUpdating = false;
 
-                        this.dispatchChangeEvent();
-                    });
-                }
+                            // This watcher TRIGGERS the controlled update
+                            this.$watch('selectedYear', () => {
+                                this.isUpdating = true; // 1. Set the flag
+                                
+                                const newOptions = this.getDateRangeOptions();
+                                this.selectedDateRange = newOptions[0] || null; // 2. This change would normally trigger the watcher below
+                                
+                                this.dispatchChangeEvent();
+                                
+                                this.$nextTick(() => {
+                                    this.isUpdating = false; // 4. Reset the flag after the DOM updates
+                                });
+                            });
+
+                            // This watcher RESPECTS the controlled update
+                            this.$watch('selectedDateRange', () => {
+                                // 3. The flag prevents this watcher's logic from running during the update
+                                if (this.isUpdating) return; 
+
+                                this.dispatchChangeEvent();
+                            });
+                        }
 
 
-    Data-Bridge Component:
+    Data-Bridge Implementation Rules:
         1) The data-bridge component will always use the fetch API and not AJAX.
 
         2) The data-bridge component will always have a comment at the top of the file that showcases the structure of the expected data it expects to recieve from the getData endpoint in the controller.
-    
-        3)The data bridge component should always have a isLoading and error class/instance variable.
 
-        4) The Async function should always be called fetchData unless we need multiple and need to specify between them.
+        3) The Async function should always be called fetchData unless we need multiple and need to specify between them.
             - If there are mutliple, they will always exist in one data-bridge with multiple fetch abilities, rather than mutliple data-bridges. 
-    
-        5) For most pages, display components are closely related and updated together. Therefore, the data-bridge should dispatch the entire data object received from the controller in the [feature]-data-updated event.
-            - Each display component is then responsible for listening to this single event and extracting the specific data it needs from the payload.
-            - This approach simplifies the data-bridge's logic by avoiding the need to create unique events for each component. This pattern should only be broken if display components have completely separate and independent update cycles.
     
     Display Component:
         1)The functions in the display components alpine object that handle loading and errors should be the last two functions in the display component's functions, in that order (update function, then error function)
@@ -483,7 +495,7 @@ Alpine Rules:
                 <div x-data="PPQuickListLogic()" 
                     @payroll-data-loading.window="handlePayrollFetchInitiated($event)"
                     @payroll-data-updated.window="handlePayrollDataUpdate($event)"
-                    @payroll-data-error.window="handlePayrollError($event)"
+                    @payroll-fetch-error.window="handlePayrollError($event)"
                     ...
                 </div>
 

@@ -40,21 +40,13 @@
 <script>
 function dataBridge() {
     return {
-        isLoading: false,
-        error: null,
-
         /**
-         * Fetches data from the server based on the event payload.
          * @param {CustomEvent} event The event dispatched from the control panel.
          */
         async fetchData(event) {
-            console.log("in fetch data");
-            this.isLoading = true;
-            this.error = null;
             const payload = event.detail;
-
-            // Log the payload for debugging purposes
             console.log('Data Bridge received new filter data:', payload);
+
             this.$dispatch('payroll-data-loading');
             try {
                 // Perform a fetch request to our API endpoint
@@ -69,12 +61,6 @@ function dataBridge() {
                     body: JSON.stringify(payload)
                 });
 
-                // Check if the request was successful
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || `HTTP ${response.status}`);
-                }
-
                 const data = await response.json();
 
                 // Dispatch a new event with the fetched data for other components
@@ -82,11 +68,8 @@ function dataBridge() {
                 console.log('Data Bridge dispatched new data:', data);
 
             } catch (error) {
-                this.error = error.message;
                 console.error('Payroll data error:', error.message);
                 this.$dispatch('payroll-data-error', { message: error.message });
-            } finally {
-                this.isLoading = false;
             }
         }
     }

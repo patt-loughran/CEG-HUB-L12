@@ -15,7 +15,7 @@
 <div x-data="payrollTableLogic()" 
     @payroll-data-loading.window="handlePayrollFetchInitiated()"
     @payroll-data-updated.window="handlePayrollDataUpdate($event)"
-    @payroll-data-error.window="handlePayrollError($event)"
+    @payroll-fetch-error.window="handlePayrollError($event)"
     @process-export.window="handleExport($event)"
     class="bg-white rounded-lg shadow-sm border border-slate-200 flex flex-col flex-1 min-h-[320px] max-w-full relative overflow-hidden">
       
@@ -328,20 +328,53 @@
             getAvatarColors(initials) { return help_get_avatar_colors(initials); },
 
             // --- Event Handlers from Data-Bridge ---
-            handlePayrollFetchInitiated() { this.isLoading = true; this.error = null; this.showSummary = false;},
-            handlePayrollDataUpdate(event) {
-                const data = event.detail;
-                this.tableData = data.tableData;
-                this.summaryRows = data.summaryRows;
-                this.payPeriodIdentifier = data.payPeriodIdentifier;
+            handlePayrollFetchInitiated() { 
+                this.isLoading = true; 
+                this.error = null; 
+                this.showSummary = false;
+            },
+            handlePayrollDataUpdate(event) {    
+                // 1. Extract the specific payload for THIS component
+                const responseObj = event.detail.tableData;
+
+                // Safety check: if controller didn't return this key for some reason
+                if (!responseObj) {
+                    this.handlePayrollError({ detail: { message: "Invalid response format" } });
+                    return;
+                }
+
+                // 2. Check for Component-Specific Error (ApiResponse::error)
+                if (responseObj.errors) {
+                    this.error = { message: responseObj.errors }; // Display the specific error message
+                    this.tableData = []; 
+                    this.summaryRows = [];
+                    this.isLoading = false;
+                    return;
+                }
+
+                // 3. Handle Success (ApiResponse::success)
+                // Note: We access .data twice. 
+                // First .data is the ApiResponse getter. 
+                // Second .tableData/.summaryRows are the keys inside your specific return array.
+                const payload = responseObj.data; 
+
+                this.tableData = payload.tableData;
+                this.summaryRows = payload.summaryRows;
+                this.payPeriodIdentifier = payload.payPeriodIdentifier;
+                
                 this.isLoading = false;
                 this.error = null;
             },
+
             handlePayrollError(event) {
+                // CHANGE 3: Handle Global/Network Errors
+                // This triggers on 500s or Network Timeouts caught by DataBridge
                 this.error = event.detail;
                 this.tableData = [];
+                this.summaryRows = [];
                 this.isLoading = false;
             },
+
             // --- Export Functionality ---
             openExportModal() {
                 // Generate a default filename with date
