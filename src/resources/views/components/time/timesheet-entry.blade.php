@@ -1,7 +1,8 @@
 <div x-data='timeTimesheetEntryLogic()'
      @timesheet-data-loading.window="handleDataLoading()"
-     @timesheet-data-updated.window="handleDataUpdate($event.detail)"
-     @timesheet-data-error.window="handleDataError($event.detail)"
+     @timesheet-data-updated.window="handleDataUpdate($event)"
+     @timesheet-fetch-error.window="handleFetchError($event)"
+     @timesheet-recent-loaded.window="handleRecentLoaded($event)"
      class="flex flex-col h-full w-full rounded-lg border border-slate-300 bg-white p-6 font-sans shadow-sm">
     
     <!-- Component Header -->
@@ -138,7 +139,14 @@
                 </button>
                 <div x-show="showActionsMenu" @click.away="showActionsMenu = false" x-transition class="absolute bottom-full z-100 mb-2 w-max min-w-full rounded-md bg-white py-1 shadow-lg ring-1 ring-black ring-opacity-5" style="display: none;">
                     <button @click="revertChanges(); showActionsMenu = false;" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">Revert Changes</button>
-                    <button @click="loadFromLastWeek(); showActionsMenu = false;" class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">Load from last week</button>
+                    <button @click="loadRecentRows(1); showActionsMenu = false;" 
+                            class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
+                        Load from Last Week
+                    </button>
+                    <button @click="loadRecentRows(2); showActionsMenu = false;" 
+                            class="block w-full whitespace-nowrap px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
+                        Load from Last 2 Weeks
+                    </button>
                 </div>
             </div>
         </div>
@@ -152,30 +160,30 @@
     </div>
 </div>
   
+    
 @push('scripts')
 <script>
     function timeTimesheetEntryLogic() {
         return {
-            // Data properties
+            // 1. Class/Instance Variables set to null
             headerInfo: null,
             dateHeaders: null,
             timesheetRows: null,
             pristineTimesheetRows: null,
             footerTotals: null,
             payPeriodTotal: null,
-            persistedPayPeriodHours: null, 
+            persistedPayPeriodHours: null,
             initialWeeklyTotal: null,
             dropdownData: null,
-
-            // State management
             isLoading: null,
             error: null,
             hasUnsavedChanges: null,
             isEditingCell: null,
+            currentStartDate: null, 
 
-
-
+            // 2. Init Function
             init() {
+                // 2a. Initialize class/instance variables
                 this.headerInfo = { weekLabel: '', payPeriodLabel: '' };
                 this.dateHeaders = Array(7).fill({ day: '', date: '', isWeekend: false });
                 this.timesheetRows = [];
@@ -185,11 +193,14 @@
                 this.persistedPayPeriodHours = 0;
                 this.initialWeeklyTotal = 0;
                 this.dropdownData = {};
-                this.isLoading = true;
-                this.error = null;
-                this.hasUnsavedChanges = false;
-                this.isEditingCell = false;
+                this.currentStartDate = null;
                 
+                // Display components SHOULD set isLoading to true to handle initial page load
+                this.isLoading = true; 
+                this.error = null;
+                this.isEditingCell = false;
+
+                // 2b. Define Watchers
                 this.$watch('timesheetRows', (newRows, oldRows) => {
                     if (this.isLoading || !oldRows || newRows.length !== oldRows.length) return;
 
@@ -204,21 +215,22 @@
                         }
                     });
 
-                    // Standard unsaved changes check
-                     if (!this.isLoading) {
-                        this.hasUnsavedChanges = JSON.stringify(this.timesheetRows) !== JSON.stringify(this.pristineTimesheetRows);
-                    }
                 }, { deep: true });
 
-                window.addEventListener('beforeunload', (event) => {
-                    if (this.hasUnsavedChanges) {
-                        event.preventDefault();
-                        event.returnValue = '';
-                    }
-                });
+                // 2c. Define callbacks to local alpine.store
+                this.$store.timesheetPageRegistry.registerDirtyCheck(() => this.hasUnsavedChanges());
+
             },
 
-            // === DATA CALCULATION METHODS ===
+            // 3. Other Functions (Calculation & Interaction)
+
+            hasUnsavedChanges() {
+                if (this.isLoading) return false;
+                if (!this.pristineTimesheetRows || !this.timesheetRows) return false;
+                
+                return JSON.stringify(this.timesheetRows) !== JSON.stringify(this.pristineTimesheetRows);
+            }, 
+
             calculateRowTotal(rowIndex) {
                 let total = this.timesheetRows[rowIndex].hours.reduce((sum, hour) => sum + parseFloat(hour.value || 0), 0);
                 this.timesheetRows[rowIndex].rowTotal = total;
@@ -239,7 +251,6 @@
                 const newWeeklyTotal = newDailyTotals.reduce((sum, total) => sum + total, 0);
                 this.footerTotals.weeklyTotal = newWeeklyTotal;
 
-                // Update pay period total in real-time based on the delta from its initial state
                 this.payPeriodTotal = (this.persistedPayPeriodHours - this.initialWeeklyTotal) + newWeeklyTotal;
             },
 
@@ -250,7 +261,6 @@
                 if (isNaN(numericValue) || numericValue < 0) {
                     this.timesheetRows[rowIndex].hours[hourIndex].value = 0;
                 } else {
-                    // Store as a number, not a formatted string
                     this.timesheetRows[rowIndex].hours[hourIndex].value = (Math.round(numericValue * 4) / 4);
                 }
                 this.recalculateAllTotals();
@@ -262,11 +272,10 @@
                 }
             },
 
-            // === ROW MANAGEMENT METHODS ===
             addNewRow() {
                 const newHours = this.dateHeaders.map(header => ({ value: 0, isWeekend: header.isWeekend }));
                 this.timesheetRows.push({
-                    rowId: `new_${Date.now()}`,
+                    rowId: this.generateRowId('new'),
                     project_code: '',
                     sub_project: '',
                     activity_code: '',
@@ -285,49 +294,117 @@
                 this.recalculateAllTotals();
             },
 
+            deleteAll() {
+                if (!confirm("Are you sure you want to delete all un-pinned rows?")) return;
+
+                const originalLength = this.timesheetRows.length;
+                this.timesheetRows = this.timesheetRows.filter(row => row.is_pinned);
+                
+                this.recalculateAllTotals();
+            },
+
             togglePin(rowIndex) {
-                // Flip the boolean value for the is_pinned property
                 this.timesheetRows[rowIndex].is_pinned = !this.timesheetRows[rowIndex].is_pinned;
+            },
+            pinAll() {
+                if (this.timesheetRows.length === 0) return;
+                
+                const allPinned = this.timesheetRows.every(row => row.is_pinned);
+
+                this.timesheetRows.forEach(row => {
+                    row.is_pinned = !allPinned;
+                });
             },
 
             revertChanges() {
                 if (confirm('Are you sure you want to discard all changes?')) {
                     this.timesheetRows = JSON.parse(JSON.stringify(this.pristineTimesheetRows));
                     this.recalculateAllTotals();
-                    this.hasUnsavedChanges = false;
                 }
             },
+
+            loadRecentRows(weeksBack) {
+                if (!this.currentStartDate) {
+                    this.handleError("Reference date missing. Please reload.");
+                    return;
+                }
+                
+                this.$dispatch('timesheet-load-recent', {
+                    referenceDate: this.currentStartDate,
+                    weeksBack: weeksBack
+                });
+            },
+
+            handleRecentLoaded(event) {
+                const responseObj = event.detail.recentRows;
+
+                if (!responseObj) return; // Should handle error
+                if (responseObj.errors) {
+                    this.handleError(responseObj.errors);
+                    return;
+                }
+
+                const newRowsData = responseObj.data;
+                let addedCount = 0;
+
+                // Create a Set of existing keys to prevent duplicates
+                // Key format: "Project|Sub|Activity"
+                const existingKeys = new Set(this.timesheetRows.map(row => 
+                    `${row.project_code}|${row.sub_project}|${row.activity_code}`
+                ));
+
+                // Generate empty hour structure for new rows
+                const emptyHours = this.dateHeaders.map(header => ({ value: 0, isWeekend: header.isWeekend }));
+
+                newRowsData.forEach(item => {
+                    const key = `${item.project_code}|${item.sub_project}|${item.activity_code}`;
+                    
+                    if (!existingKeys.has(key)) {
+                        this.timesheetRows.push({
+                            rowId: this.generateRowId('loaded'),
+                            project_code: item.project_code,
+                            sub_project: item.sub_project,
+                            activity_code: item.activity_code,
+                            is_pinned: false, // Default to unpinned
+                            hours: JSON.parse(JSON.stringify(emptyHours)), // Deep copy
+                            rowTotal: 0
+                        });
+                        addedCount++;
+                    }
+                });
+
+                // Force UI update and recalculate
+                this.isLoading = false; // Turn off loading if data-bridge turned it on
+                
+                if (addedCount > 0) {
+                    this.recalculateAllTotals();
+                    // Optional: Show a toast/notification saying "X rows added"
+                } else {
+                    // Optional: Show toast "No unique rows found from previous week"
+                }
+            },
+
 
             onCellFocus(event) {
                 if (!this.isEditingCell) {
                     event.target.select();
                 }
             },
-            onCellEdit(event) {
-                // The input element that was double-clicked
-                const input = event.target;
 
-                // Get the X and Y coordinates of the mouse click
+            onCellEdit(event) {
+                const input = event.target;
                 const x = event.clientX;
                 const y = event.clientY;
 
-                // Use the browser's built-in function to find the text position from the coordinates
                 let caretPosition;
                 if (document.caretPositionFromPoint) {
                     caretPosition = document.caretPositionFromPoint(x, y);
                 } else {
-                    // Fallback for older browsers (less common now)
-                    console.warn('document.caretPositionFromPoint is not supported in this browser.');
                     return;
                 }
 
-                // The caretPosition object contains the text node and the character offset
                 if (caretPosition) {
                     const offset = caretPosition.offset;
-                    
-                    // Use setSelectionRange to place the cursor at the calculated offset.
-                    // The two arguments are the start and end of the selection.
-                    // By making them the same, we place the cursor without a selection.
                     input.setSelectionRange(offset, offset);
                 }
 
@@ -365,21 +442,17 @@
                     case 'Enter':
                         event.preventDefault();
                         if (hourIndex < this.dateHeaders.length - 1) {
-                            // Move to the next cell in the same row
                             nextHourIndex = hourIndex + 1;
                         } else if (rowIndex < this.timesheetRows.length - 1) {
-                            // Move to the first cell of the next row
                             nextHourIndex = 0;
                             nextRowIndex = rowIndex + 1;
                         }
                         break;
                     default:
-                        // Allow other keys to function as normal
                         return;
                 }
                 
                 const nextCellId = `cell-${nextRowIndex}-${nextHourIndex}`;
-                console.log(nextCellId);
                 this.$nextTick(() => {
                     const nextCell = document.getElementById(nextCellId);
                     if (nextCell) {
@@ -388,8 +461,10 @@
                     }
                 });
             },
+            generateRowId(prefix) {
+                return `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            },
 
-            // === SAVE TIMESHEET ===
             dispatchSaveEvent() {
                 this.$dispatch('save-timesheet', {
                   timesheetRows: this.timesheetRows,
@@ -397,53 +472,67 @@
                 });
             },
 
-            // === EVENT HANDLERS ===
+            // 4. Data Handling Functions (Loading, Update, Error)
+            
             handleDataLoading() {
                 this.isLoading = true;
                 this.error = null;
+                // Reset visual state for skeleton
                 this.headerInfo = { weekLabel: 'Loading...', payPeriodLabel: '' };
                 this.timesheetRows = [];
                 this.payPeriodTotal = 0;
-                this.hasUnsavedChanges = false;
             },
 
-            handleDataUpdate(timesheetData) {
-                if (!timesheetData || !timesheetData.success) {
-                    this.handleInputError({ message: timesheetData.errors || 'Failed to parse timesheet data.' });
+            handleDataUpdate(event) {
+                // 1. Extract specific payload using Controller Key (timesheetData)
+                const responseObj = event.detail.timesheetData;
+
+                // Safety check
+                if (!responseObj) {
+                    this.handleError("Invalid response format: timesheetData missing");
                     return;
                 }
 
-                const data = timesheetData.data;
+                // 2. Check for Component-Specific Error
+                if (responseObj.errors) {
+                    this.handleError(responseObj.errors);
+                    return;
+                }
+
+                // 3. Process Success Data
+                const data = responseObj.data;
+                
                 this.headerInfo = data.headerInfo;
                 this.dateHeaders = data.dateHeaders;
                 this.timesheetRows = data.timesheetRows;
                 this.dropdownData = data.dropdownData;
-                console.log('[Parent Component] Dropdown data received from server:', JSON.parse(JSON.stringify(this.dropdownData)));
-
-                // Perform initial calculation for the newly loaded week
+                this.currentStartDate = data.headerInfo.currentStartDate; 
+                
                 this.recalculateAllTotals();
-                
-                // Store the initial weekly total to calculate the delta on user input
                 this.initialWeeklyTotal = this.footerTotals.weeklyTotal;
-                
-               // Store the authoritative pay period total from the DB. This is our baseline.
                 this.persistedPayPeriodHours = data.payPeriodTotal;
-
-                // Display this authoritative total on initial load of the new week's data.
                 this.payPeriodTotal = data.payPeriodTotal;
 
                 this.pristineTimesheetRows = JSON.parse(JSON.stringify(data.timesheetRows));
-                this.hasUnsavedChanges = false;
+                
                 this.isLoading = false;
                 this.error = null;
             },
 
-            handleDataError(detail) {
-                this.error = detail.message;
+            handleFetchError(event) {
+                const errorMessage = event.detail;
+                this.handleError(errorMessage);
+            },
+
+            handleError(errorMessage) {
+                this.error = errorMessage;
                 this.isLoading = false;
+                // Dispatch error modal instead of showing local error state
                 this.$dispatch('error-modal', { message: this.error });
             }
         }
     }
 </script>
 @endpush
+
+  

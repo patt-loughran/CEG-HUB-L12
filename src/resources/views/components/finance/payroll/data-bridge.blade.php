@@ -44,10 +44,9 @@ function dataBridge() {
          * @param {CustomEvent} event The event dispatched from the control panel.
          */
         async fetchData(event) {
-            const payload = event.detail;
-            console.log('Data Bridge received new filter data:', payload);
-
             this.$dispatch('payroll-data-loading');
+            const userInputVariables = event.detail;
+
             try {
                 // Perform a fetch request to our API endpoint
                 const response = await fetch('/finance/payroll/getdata', {
@@ -58,18 +57,15 @@ function dataBridge() {
                         // Laravel requires a CSRF token for POST requests
                         'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
                     },
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify(userInputVariables)
                 });
 
-                const data = await response.json();
-
+                const payload = await response.json();
                 // Dispatch a new event with the fetched data for other components
-                this.$dispatch('payroll-data-updated', data);
-                console.log('Data Bridge dispatched new data:', data);
+                this.$dispatch('payroll-data-updated', payload);
 
             } catch (error) {
-                console.error('Payroll data error:', error.message);
-                this.$dispatch('payroll-data-error', { message: error.message });
+                this.$dispatch('payroll-fetch-error', error.message);
             }
         }
     }

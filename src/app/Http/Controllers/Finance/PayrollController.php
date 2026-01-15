@@ -97,19 +97,19 @@ class PayrollController extends Controller
     public function getData(Request $request) {
         // Stage 1: Initial Validation
         try{
-            $validated = $request->validate([
-            'year' => 'required|string',
-            'dateRangeDropdown' => 'required|string',
-            'activeFilters' => 'present|array'
+            $validatedData = $request->validate([
+                'year' => 'required|string',
+                'dateRangeDropdown' => 'required|string',
+                'activeFilters' => 'present|array'
             ]);
 
-            $year = $validated['year'];
+            $year = $validatedData['year'];
             $startDate = null;
             $endDate = null;
-            $activeFilters = $validated['activeFilters'];
+            $activeFilters = $validatedData['activeFilters'];
 
             // Use regex to extract the MM/DD parts from a string like "PP 05 (03/16 - 03/29)"
-            preg_match('/\((\d{2}\/\d{2}) - (\d{2}\/\d{2})\)/', $validated['dateRangeDropdown'], $matches);
+            preg_match('/\((\d{2}\/\d{2}) - (\d{2}\/\d{2})\)/', $validatedData['dateRangeDropdown'], $matches);
 
             if (count($matches) === 3) {
                 $startString = $matches[1] . '/' . $year; // e.g., "03/16/2024"
@@ -131,9 +131,8 @@ class PayrollController extends Controller
             }
         }
         catch (\Exception $e) {
-            Log::error('Date parsing failed in Payroll getData() Stage 1' . $e->getMessage(), [
-                    'validated' => $validated,
-                    'matches' => $matches,
+            Log::error('Date parsing failed in Payroll getData() Stage 1:' . $e->getMessage(), [
+                    'requestData' => $request->all(),
                     'trace' => $e->getTraceAsString(),
                     'request' => $request->all()
                 ]);
@@ -453,7 +452,7 @@ class PayrollController extends Controller
                     ];
                 }
 
-                $tableData = ["tableData" => $aggregatedHours, "summaryRows" => $summaryRows, "payPeriodIdentifier" => $validated['dateRangeDropdown']];
+                $tableData = ["tableData" => $aggregatedHours, "summaryRows" => $summaryRows, "payPeriodIdentifier" => $validatedData['dateRangeDropdown']];
                 $tableDataResponse = ApiResponse::success($tableData);
             }
         }
@@ -462,7 +461,7 @@ class PayrollController extends Controller
                     'trace' => $e->getTraceAsString(),
                     'request' => $request->all()
                 ]);
-            $tableDataResponse = ApiResponse::error("Error in calculating summary rows");
+            $tableDataResponse = ApiResponse::error("Error in calculating summary rows " . $e->getMessage());
         }
         
         // simple stat tiles
@@ -507,9 +506,9 @@ class PayrollController extends Controller
                     'request' => $request->all()
                 ]);
             
-            $totalCompanyHoursResponse = ApiResponse::error($e->getMessage());
-            $totalCompanyOvertimeResponse = ApiResponse::error($e->getMessage());
-            $averageBillablePercentageResponse = ApiResponse::error($e->getMessage());
+            $totalCompanyHoursResponse = ApiResponse::error('Error in calculating stat tiles' . $e->getMessage());
+            $totalCompanyOvertimeResponse = ApiResponse::error('Error in calculating stat tiles' . $e->getMessage());
+            $averageBillablePercentageResponse = ApiResponse::error('Error in calculating stat tiles' . $e->getMessage());
         }
         
 

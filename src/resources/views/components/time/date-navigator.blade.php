@@ -29,7 +29,12 @@
                         :class="{ 'border-b border-slate-200': periodIndex < payPeriodNavData.length - 1 }">
                         <!-- Loop through the weeks within the period -->
                         <template x-for="(week, weekIndex) in period.weeks" :key="weekIndex">
-                            <a href="#" @click.prevent="selectWeek(periodIndex, weekIndex)" x-bind:class="{ 'bg-blue-100': isWeekSelected(week) }" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" x-text="week.weekLabel"></a>
+                            <button 
+                                @click="selectWeek(periodIndex, weekIndex)" 
+                                :class="{ 'bg-blue-100': isWeekSelected(week) }" 
+                                class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left w-full"
+                                x-text="week.weekLabel">
+                            </button>
                         </template>
                     </div>
                 </template>
@@ -49,6 +54,8 @@
      * [
      *   {
      *     "payPeriodLabel": "Jun 8 - Jun 21",
+     *     "payPeriodStartDate": 2025-06-08,
+     *     "payPeriodEndDate": "2025-06-21",
      *     "weeks": [
      *       {
      *         "weekLabel": "Jun 8 - Jun 14",
@@ -64,6 +71,8 @@
      *   },
      *   {
      *     "payPeriodLabel": "Jun 22 - Jul 5",
+     *     "payPeriodStartDate": 2025-06-22,
+     *     "payPeriodEndDate": "2025-07-05",
      *     "weeks": [
      *       // ... 2 weeks per pay period
      *     ]
@@ -83,9 +92,7 @@
             init() {
                 // 2a) Initialize class/instance variables
                 this.payPeriodNavData = dateNavigatorData;
-                console.log(dateNavigatorData);
                 this.showWeekSelector = false;
-                
                 this.setDefaultWeek();
                 
                 // 2b) Fire initial dispatch event with default values
@@ -126,6 +133,8 @@
             },
 
             navigateWeek(direction) {
+                if (!this.canNavigate()) return; 
+
                 let currentWeek = this.selectedWeekIndex;
                 let currentPeriod = this.selectedPayPeriodIndex;
 
@@ -147,6 +156,8 @@
             },
 
             selectWeek(periodIndex, weekIndex) {
+                if (!this.canNavigate()) return;
+
                 this.selectedPayPeriodIndex = periodIndex;
                 this.selectedWeekIndex = weekIndex;
                 this.showWeekSelector = false;
@@ -157,6 +168,15 @@
                 const currentSelection = this.selectedWeek();
                 return currentSelection && currentSelection.startDate === week.startDate;
             },
+
+            canNavigate() {
+                const isDirty = this.$store.timesheetPageRegistry.isPageDirty();
+                if (isDirty) {
+                    return confirm("You have unsaved changes on the timesheet. Loading new data will discard them. Continue?");
+                }
+                return true;
+            },
+
             
             // 4) dispatchChangeEvent()
             dispatchChangeEvent() {
@@ -170,7 +190,6 @@
                 const payPeriodEndDate = payPeriod.weeks[1].endDate;
                 
                 this.$dispatch('timesheet-date-change', {
-                    // Week-specific data
                     startDate: week.startDate,
                     endDate: week.endDate,
                     weekNum: weekNum,

@@ -14,6 +14,7 @@ Route::post('/finance/payroll/getdata', [App\Http\Controllers\Finance\PayrollCon
 // Make sure these are within your authenticated middleware group
 Route::get('/time/timesheet', [App\Http\Controllers\Time\TimesheetController::class, 'index'])->name('time.timesheet');
 Route::post('/time/timesheet/data', [App\Http\Controllers\Time\TimesheetController::class, 'getData']);
+Route::post('/time/timesheet/recent', [App\Http\Controllers\Time\TimesheetController::class, 'getRecentRows']);
 
 
 Route::get('/ping', function () {

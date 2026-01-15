@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use App\Http\Responses\ApiResponse;
 use App\Models\Hour;
 use App\Models\GlobalDoc;
 use App\Models\User;
@@ -13,8 +14,6 @@ use App\Models\Project;
 use App\Models\SubProject;
 use App\Models\PinnedProject;
 use Carbon\Carbon;
-use Exception;
-use App\Helpers\ErrorLogger;
 
 class TimesheetController extends Controller
 {
@@ -36,17 +35,18 @@ class TimesheetController extends Controller
             $surroundingPayPeriods = $this->getSurroundingPayPeriods($payPeriodsDoc, $today);
 
             // Prepare data for the date navigator
-            $dateNavigatorProps = $this->formatPayPeriodsForNavigator($surroundingPayPeriods);
+            $dateNavigatorData = $this->formatPayPeriodsForNavigator($surroundingPayPeriods);
 
-        } catch (Exception $e) {
-            Log::error('TimesheetController error in index(): ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
-            return view('errors.500', ['user_message' => 'Could not load timesheet data. Please try again later.',
-                                       'dev_message'  => $e->getMessage()]);
+            return view('time.timesheet', ['dateNavigatorData'  => $dateNavigatorData]);
+
+        } catch (\Exception $e) {
+            Log::error('PayrollController error in index(): ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+                'request' => $request->all()
+            ]);
+
+            return response()->view('errors.500', ['error_message' => $e->getMessage()], 500);
         }
-
-        return view('time.timesheet', [
-            'dateNavigatorData'  => $dateNavigatorProps,
-        ]);
     }
 
     // ===================================================================
@@ -105,12 +105,9 @@ class TimesheetController extends Controller
         // max(0, ...) ensures the index is never negative.
         $startIndex = max(0, $currentIndex - 6);
 
-        // We need a total of 13 periods (6 before + 1 current + 6 after).
-        $length = 13;
-
         // Extract the relevant slice of pay periods. array_slice gracefully handles cases
         // where the requested slice size exceeds the number of available elements.
-        return array_slice($surroundingPeriods, $startIndex, $length);
+        return array_slice($surroundingPeriods, $startIndex, $this->numPayPeriods);
     }
 
      private function formatPayPeriodsForNavigator($periods) {
@@ -148,29 +145,9 @@ class TimesheetController extends Controller
      * @return \Illuminate\Http\JsonResponse
      */
     public function getData(Request $request) {
+        // Stage 1: Initial Validation
         try {
-            [$user, $startDate, $endDate, $weekNum, $formattedPayPeriod, $payPeriodStartDate, $payPeriodEndDate] = $this->validateRequest($request);
-            $timesheetData = $this->getTimesheetData($user, $startDate, $endDate, $weekNum, $formattedPayPeriod, $payPeriodStartDate, $payPeriodEndDate, $request);
-            $statsData = $this->getStatsData($user, $request);
-
-            return response()->json([ 
-            'timesheetData' => $timesheetData, 
-            'statsData' => $statsData
-            ]); 
-        }
-        catch (Exception $e) {
-            return view('errors.500', ['user_message' => 'Could not load timesheet data. Please try again later.',
-                                       'dev_message'  => $e->getMessage()]);
-        }
-    }
-    
-    // ===================================================================
-    // GETDATA HELPER FUNCTIONS
-    // ===================================================================
-
-    private function validateRequest($request) {
-        try {
-             $validatedData = $request->validate([
+            $validatedData = $request->validate([
                 'startDate'          => 'required|date_format:Y-m-d',
                 'endDate'            => 'required|date_format:Y-m-d',
                 'weekNum'            => 'required|string',
@@ -181,19 +158,31 @@ class TimesheetController extends Controller
             ]);
 
             $user = Auth::user();
-            $user = User::where('email', 'ploughran@ceg-engineers.com')->first();
+            $user = User::where('email', 'ploughran@ceg-engineers.com')->first(); // TODO: remove
             $startDate = Carbon::parse($validatedData['startDate'])->startOfDay();
             $endDate = Carbon::parse($validatedData['endDate'])->endOfDay();
             $ppStartDate = Carbon::parse($validatedData['payPeriodStartDate'])->startOfDay();
             $ppEndDate = Carbon::parse($validatedData['payPeriodEndDate'])->endOfDay();
+            $weekNum = $validatedData['weekNum'];
+            $formattedPayPeriod = $validatedData['payPeriodLabel'];
+        }
+        catch (\Exception $e) {
+            Log::error('Input parsing from data-bridge failed in Timesheet getData() Stage 1:' . $e->getMessage(), [
+                    'requestData' => $request->all(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+            $data = [ 
+                'timesheetData' => ApiResponse::error("Validation Failed" . $e->getMessage()),
+                'statsData'     => ApiResponse::error("Validation Failed" . $e->getMessage()),
+            ];
+            return response()->json($data, 200); 
+        }
 
-            return [$user, $startDate, $endDate, $validatedData['weekNum'], $validatedData['payPeriodLabel'], $ppStartDate, $ppEndDate];
-        }
-        catch (Exception $e) {
-             ErrorLogger::logAndRethrow($e, 'Request validation failed in validateRequest method in TimesheetController', $request,[]);
-        }
-    }
-    private function getTimesheetData($user, $startDate, $endDate, $weekNum, $formattedPayPeriod, $payPeriodStartDate, $payPeriodEndDate, $request) {
+        // No shared data gathering, straight into stage 3
+
+        // Stage 3: Individual Components:
+
+        // Timesheet Data
         try {
             // 1. Get raw timesheet data as before
             $rawTimesheetData = $this->getRawTimesheetData($user, $startDate, $endDate);
@@ -215,16 +204,55 @@ class TimesheetController extends Controller
                 $mergedTimesheetData, // Use the merged data
                 $weekNum, 
                 $formattedPayPeriod, 
-                $payPeriodStartDate, 
-                $payPeriodEndDate,
+                $ppStartDate, 
+                $ppEndDate,
                 $dropdownData
             );
 
-            return ["success" => true, "data" => $formattedTimesheetData, "errors" => null];
+            $timesheetData = ApiResponse::success($formattedTimesheetData);
         }
-        catch (Exception $e) {
-            ErrorLogger::logAndRethrow($e, 'Error in getting data for timesheet in TimesheetController in getData()', $request,[]);
+        catch (\Exception $e) {
+            Log::error('Error in retireiving and processing data for timesheet ' . $e->getMessage(), [
+                'requestData' => $request->all(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            $timesheetData = ApiResponse::error('Error in calculating retireiving and processing data for timesheet ' . $e->getMessage());
         }
+        
+        // Stat Tiles Data
+        try {
+            $today = Carbon::today();
+            $payPeriodsDoc = GlobalDoc::where('name', 'Pay-Periods')->firstOrFail();
+            $surroundingPayPeriods = $this->getSurroundingPayPeriods($payPeriodsDoc, $today);
+
+            $currentPayPeriodIndex = intdiv($this->numPayPeriods, 2);
+            $currentPayPeriod = $surroundingPayPeriods[$currentPayPeriodIndex];
+            $previousPayPeriod = $surroundingPayPeriods[$currentPayPeriodIndex - 1];
+
+            // variables to be returned
+            $prevPayPeriodStatus = ApiResponse::success($this->getPrevPayPeriodStatus($user, $previousPayPeriod));
+            $daysLeftInPayPeriod = ApiResponse::success($this->getDaysLeftInPayPeriod($today, $currentPayPeriod));
+            $currentPayPeriodHours = ApiResponse::success($this->getCurrentPayPeriodHours($user, $currentPayPeriod));
+        }
+        catch (\Exception $e) {
+           Log::error('Error in retireiving and processing data for stat tiles' . $e->getMessage(), [
+                'requestData' => $request->all(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            $prevPayPeriodStatus = ApiResponse::error('Error in retireiving and processing data for stat tiles' . $e->getMessage());
+            $daysLeftInPayPeriod = ApiResponse::error('Error in retireiving and processing data for stat tiles' . $e->getMessage());
+            $currentPayPeriodHours = ApiResponse::error('Error in retireiving and processing data for stat tiles' . $e->getMessage());
+        }
+
+        $response = [ 
+            'timesheetData'         => $timesheetData, 
+            'prevPayPeriodStatus'   => $prevPayPeriodStatus,
+            'daysLeftInPayPeriod'   => $daysLeftInPayPeriod,
+            'currentPayPeriodHours' => $currentPayPeriodHours
+        ];
+
+        return response()->json($response, 200); 
     }
 
     private function getRawTimesheetData($user, $startDate, $endDate) {
@@ -386,6 +414,7 @@ class TimesheetController extends Controller
             'headerInfo' => [
                 'weekNum'      => $weekNum,
                 'payPeriodLabel' => 'of Pay Period (' . $formattedPayPeriod . ')',
+                'currentStartDate' => $startDate->toDateString(),
             ],
             'dateHeaders'    => $dateHeaders,
             'timesheetRows'  => $sortedTimesheetRows,
@@ -445,7 +474,11 @@ class TimesheetController extends Controller
  */
  private function getDropdownData() {
     // 1. Fetch all projects from the database.
-    $projects = Project::all();
+    $projects = Project::where('visibleInTimesheet', true) // Filter 1: Only visible projects
+                       ->whereNotNull('projectcode')       // Filter 2: Remove NULL project codes
+                       ->where('projectcode', '!=', '')    // Filter 3: Remove empty string project codes
+                       ->get();
+
     $dropdownData = [];
     $projectCodes = $projects->pluck('projectcode')->unique()->all();
     $subProjectNames = $projects->pluck('sub-projects')->flatten()->unique()->all();
@@ -487,79 +520,20 @@ class TimesheetController extends Controller
     return $dropdownData;
     }
 
-    private function getStatsData($user, $request) {
-        try {
-        $today = Carbon::today();
-        $payPeriodsDoc = GlobalDoc::where('name', 'Pay-Periods')->firstOrFail();
-        $surroundingPayPeriods = $this->getSurroundingPayPeriods($payPeriodsDoc, $today);
-
-        $currentPayPeriodIndex = intdiv($this->numPayPeriods, 2);
-        $currentPayPeriod = $surroundingPayPeriods[$currentPayPeriodIndex];
-        $previousPayPeriod = $surroundingPayPeriods[$currentPayPeriodIndex - 1];
-
-        // Calculate initial stats
-        return [
-            'prevPayPeriodStatus'   => $this->getPrevPayPeriodStatus($user, $previousPayPeriod), // data can be "submitted" or "late"
-            'daysLeftInPayPeriod'   => $this->getDaysLeftInPayPeriod($today, $currentPayPeriod),
-            'currentPayPeriodHours' => $this->getCurrentPayPeriodHours($user, $currentPayPeriod)
-        ];
-        }
-        catch (Exception $e) {
-            ErrorLogger::logVerbose($e, 'Error in getting data for stat tiles for timesheet', $request,[]);
-           return [
-                'prevPayPeriodStatus'   => ["success" => false, "data" => null, "errors" => $e->getMessage()],
-                'daysLeftInPayPeriod'   => ["success" => false, "data" => null, "errors" => $e->getMessage()],
-                'currentPayPeriodHours' => ["success" => false, "data" => null, "errors" => $e->getMessage()]
-            ];
-        }
-    }
-
     private function getPrevPayPeriodStatus($user, $period) {
-        try {
-            $totalHours = $this->getTotalHoursForPeriod($user, $period['start_date'], $period['end_date']);
-            $prevPayPeriodStatus = $totalHours >= 80 ? 'Submitted' : 'Late';
-            
-            return [
-                "success" => true,
-                "data"    => $prevPayPeriodStatus,
-                "errors"  => null
-            ];
-        } catch (Exception $e) {
-            ErrorLogger::logVerbose($e,'Failed to get previous pay-period status ');
-            return [
-                'success' => false,
-                'data'    => null,
-                'error'   => $e->getMessage()
-            ];
-        }
+        $totalHours = $this->getTotalHoursForPeriod($user, $period['start_date'], $period['end_date']);
+        $prevPayPeriodStatus = $totalHours >= 80 ? 'Complete' : 'Incomplete';
+        
+        return $prevPayPeriodStatus;
     }
 
     private function getDaysLeftInPayPeriod($today, $currentPayPeriod) {
-        try {
-            $daysLeftInPayPeriod = (int) ($today->diffInDays($currentPayPeriod['end_date'], absolute:false) + 1);
-            return [
-                "success" => true,
-                "data"    => $daysLeftInPayPeriod,
-                "errors"  => null
-            ];
-        } catch (Exception $e) {
-            ErrorLogger::logVerbose('Failed to get days left in current pay-period ' . $e->getMessage());
-            return [
-                'success' => false,
-                'data'    => null,
-                'error'   => $e->getMessage()
-            ];
-        }
+        $daysLeftInPayPeriod = (int) ($today->diffInDays($currentPayPeriod['end_date'], absolute:false) + 1);
+        return $daysLeftInPayPeriod;
     }
 
     private function getCurrentPayPeriodHours($user, $currentPayPeriod) {
-        try {
-            $currentPayPeriodHours = $this->getTotalHoursForPeriod($user, $currentPayPeriod['start_date'], $currentPayPeriod['end_date']);
-        }
-        catch (Exception $e) {
-            
-        }
-        return $currentPayPeriodHours;
+        return $currentPayPeriodHours = $this->getTotalHoursForPeriod($user, $currentPayPeriod['start_date'], $currentPayPeriod['end_date']);
     }
 
     private function getTotalHoursForPeriod($user, $startDate, $endDate) {
@@ -582,6 +556,86 @@ class TimesheetController extends Controller
         })->toArray();
 
         return $result[0]['total_hours'] ?? 0;
+    }
+
+     /**
+     * Fetches unique project structures from previous weeks.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getRecentRows(Request $request) {
+        // Stage 1: Initial Validation
+        try {
+            $validatedData = $request->validate([
+                'referenceDate' => 'required|date_format:Y-m-d',
+                'weeksBack'     => 'required|integer|min:1|max:2',
+            ]);
+
+            $referenceDate = Carbon::parse($validatedData['referenceDate'])->startOfDay();
+            $weeksBack = (int) $validatedData['weeksBack'];
+
+            // Calculate target range
+            $targetStartDate = $referenceDate->copy()->subWeeks($weeksBack);
+            $targetEndDate = $targetStartDate->copy()->addDays(6)->endOfDay();
+            
+            $user = Auth::user(); 
+            $user = User::where('email', 'ploughran@ceg-engineers.com')->first(); // Keep your dev override if needed
+        } catch (\Exception $e) {
+             Log::error('Validation failed in getRecentRows: ' . $e->getMessage(), [
+                    'requestData' => $request->all(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+             return response()->json(['recentRows' => ApiResponse::error("Validation Failed")], 200);
+        }
+
+        // Stage 2: Shared Data (None needed for this specific lightweight request)
+
+        // Stage 3: Individual Components
+        try {
+            // Reuse existing logic to get raw data
+            $rawPreviousData = $this->getRawTimesheetData($user, $targetStartDate, $targetEndDate);
+            $historicalProjectCodes = collect($rawPreviousData)->pluck('project_code')->unique()->values();
+
+            $validProjectCodes = Project::whereIn('projectcode', $historicalProjectCodes) // In case previois week has codes that are no longer valid
+            ->where('visibleInTimesheet', true)
+            ->pluck('projectcode')
+            ->toArray();
+
+            // Process into unique rows (structure only, no hours)
+            $uniqueRows = [];
+            $seenKeys = [];
+
+            foreach ($rawPreviousData as $entry) {
+                 // 3. Skip this entry if the project code is not in our valid list
+                if (!in_array($entry['project_code'], $validProjectCodes)) {
+                    continue;
+                }
+                $key = $entry['project_code'] . '|' . $entry['sub_project'] . '|' . $entry['activity_code'];
+
+                if (!in_array($key, $seenKeys)) {
+                    $seenKeys[] = $key;
+                    $uniqueRows[] = [
+                        'project_code' => $entry['project_code'],
+                        'sub_project'  => $entry['sub_project'],
+                        'activity_code'=> $entry['activity_code'],
+                        // We do not copy is_pinned here, relying on the current user's current pin state logic in frontend 
+                        // or defaulting to false allows the user to pin them manually if desired.
+                    ];
+                }
+            }
+            
+            $recentRows = ApiResponse::success($uniqueRows);
+
+        } catch (\Exception $e) {
+                Log::error('Error in getRecentRows: ' . $e->getMessage(), [
+                    'requestData' => $request->all(),
+                    'trace' => $e->getTraceAsString(),
+                ]);
+            $recentRows = ApiResponse::error("Unable to retrieve recent rows " . $e->getMessage());
+        }
+
+        return response()->json(['recentRows' => $recentRows], 200);
     }
 
     // ===================================================================

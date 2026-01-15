@@ -20,16 +20,17 @@ General:
                 - This index() method gathers all necessary initial data and passes it to the primary Blade view.
 
             Primary View:
-                - The primary view's role is strictly to structure the layout of the webpage and is comprised of blade components.
+                - The primary view's role is strictly to structure the layout of the webpage and hold shared data. It is comprised of blade components.
                 - It arranges these various Blade components, defining their visual presentation and dimensions. This includes making the components visual layout responsive.
                 - The primary view recieves the data needed for initial page load from its primary controller and passes this data to the blade components as props.
+                - The primary view is responsible for defining a local, feature-scoped Alpine.store. This store acts as a "Registry" for cross-component communication, specifically for handling "Dirty State" checks (unsaved changes) without tight coupling.
 
             Blade Components:
                 - Blade components handle all user interactions and state changes using Alpine.JS. We do NOT use LiveWire. The components can be of three classes: User Input (visual), Data Bridge (headless), and Display (visual). Note, this is for all non-custom pages.
     
                 User Input Components: These components contain HTML elements for user input, e.g. <input> or <select>. They may also contain custom input components found at src/resources/views/components/inputs
                 - Modifying these inputs and/or hitting a "submit" button will result in a custom event being dispatched to the data bridge, indicating we need to fetch new data for a specific "Synchronous Group" or an independent display component (Synchronous Group of size 1).
-                - **Synchronous Group:** A collection of display components that logically update together based on the same user input filters.
+                - Synchronous Group: A collection of display components that logically update together based on the same user input filters.
                 - There are two main layouts for a User Input component. Either custom events are triggered on change of the input elements and are sent as soon as a change is made, or there is a "submit" button that sends the state of the neccessary input elements.
                 - Usually there is just one User Input Component, but there can be mutliple depending on the page. One User Input Component can be responsible for multiple Synchronous Groups. 
                 - A User Input component will send out one singular event for each unique synchronous group.
@@ -149,355 +150,507 @@ General:
 
             General Controller Rules:
                 - Use Carbon for all date objects in the controller. Often one of our first steps is taking date strings sent in from the data-bridge and converting them to Carbon Objects to be used.
-        Alpine Rules:
 
-            General:
-                1) Do not define the Alpine object within the x-data, but instead, define it in a separate script tag at the bottom of the component file. The name of the function called should be the CamelCase path to the component file followed by the word "Logic". See the example below for the user input component of the payroll page for the finance team:
+        Primary View Implementation Rules:
+            1) The primary view is responsible for defining a localized "Registry" Store. This store manages the "Dirty State" of the page (tracking unsaved changes across components) without tightly coupling the User Input component to the Display components.
+            2) This store should be defined in a script tag within the @push('scripts') stack at the bottom of the primary view file.
+            3) The store must include an array of checks, a registration function, and an execution function. The execution function (`isPageDirty`) should include a try-catch block to prevent a single component error from breaking the navigation logic.
                 
-                <div x-data='financePayrollControlPanelLogic(@json($phpVarFromProps))'>
-                    ...
-                </div>
-
+                Example:
                 @push('scripts')
                 <script>
-                        function financePayrollCOntrolPanelLogic(dateRanges) {
+                    document.addEventListener('alpine:init', () => {
+                        Alpine.store('financePayrollRegistry', {
+                            checks: [],
+                            
+                            /**
+                            * Register a callback function that returns true if dirty, false if clean.
+                            */
+                            registerDirtyCheck(callbackFunction) {
+                                this.checks.push(callbackFunction);
+                            },
+
+                            /**
+                            * Check all registered components. Returns true if ANY component is dirty.
+                            */
+                            isPageDirty() {
+                                return this.checks.some(checkFn => {
+                                    try {
+                                        return checkFn();
+                                    } catch (e) {
+                                        console.error("Dirty check failed for a component:", e);
+                                        return false; 
+                                    }
+                                });
+                            }
+                        });
+                    });
+                </script>
+                @endpush
+        
+        User Input Component Implementation Rules:
+            1) When defining the Alpine function for the User Input Object, the different sections should be in the following order:
+                @push('scripts')
+                <script>
+                        function financeControlPanelLogic(dateRanges) {
                         return {
-                        <Alpine Object vars and functions here>
+                        1)Class/Instance Variables set to null
+                        2)init() {
+                            2a)initialize class/instance variables
+                            2b)define watchers
+                            2c)
+                            }
+                        3)otherFunctions()
+                        4)dispatchChangeEvent()
+                        
                     }
                     }
                 </script>
                 @endpush
 
-                2) Always use the full x-bind:attribute="<some JavaScript Expression here>" instead of :attribute="<some JavaScript Expression here>"
-                    - this is because In Laravel, we use the ":" character to pass PHP expressions to Blade Components as props, and having them both in there can feel confusing
+            2) at the end of the init function in the User Input Component, manually dispatch an initial event to load the default data for all the display components. The display components should always get their default data from an initial dispatch, and not pre-loaded from the controller somehow. 
+                - This must be done using nextTick to ensure the display components are ready.
+                Good example:
+                    init() {
+                        // Initialize Instance Variables
+                        this.selectedYear = new Date().getFullYear().toString();
+                        this.selectedDateRange = this.getDateRangeOptions()[0] || null;
+                        this.activeFilters = ["active"]
+                        this.isUpdating = false;
 
-                3) Always set any class/instance variables for the alpine object to null and then initialize them in the first part of the init() function
-                    Example:
-                        function financePayrollControlPanelLogic(dateRanges) {
-                            return {
-                                selectedYear:  null,
-                                selectedDateRange: null,
-                                activeFilters: null,
-                                isUpdating: null,
+                        // Set up watchers //
 
-                                init() {
-                                    // Initialize Instance Variables
-                                    this.selectedYear = new Date().getFullYear().toString();
-                                    this.selectedDateRange = this.getDateRangeOptions()[0] || null;
-                                    this.activeFilters = ["active"]
-                                    this.isUpdating = false;
-                                    ...
-                                }
-                            }
-                        }
-                4) When you are conditionally setting the TailWind classes of an html element using x-bind:class="", if possible use the ternary, operator. If not, use Object Syntax:
-                    - Example if ternary possible:
-                        x-bind:class="activeFilters.includes(filter) ? 'bg-slate-700 text-white font-semibold' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'"
-
-                    -Example if not possible:
-                        x-bind:class="{
-                            'bg-green-500 text-white': status === 'success',
-                            'bg-yellow-500 text-black': status === 'warning', 
-                            'bg-red-500 text-white': status === 'error',
-                            'bg-gray-500 text-white': status === 'pending'
-                            }"
-                5) When using <template> elements inside x-for blocks, if what is being populated needs to dynamically change, try to use just one template chunk with a function instead of multiple
-                    - Bad Example:
-                        <select class="col-span-3 w-full bg-slate-50 border">
-                            <template x-if="rangeMode === 'month'">
-                                <template x-for="month in monthsForSelectedYear" :key="month">
-                                    <option x-bind:value="month" x-text="month"></option>
-                                </template>
-                            </template>
-                            <template x-if="rangeMode === 'payPeriod'">
-                                <template x-for="pp in payPeriodsForSelectedYear" :key="pp">
-                                    <option x-bind:value="pp" x-text="pp"></option>
-                                </template>
-                            </template>
-                        </select>
-                        ...
-                        <script>
-                            function financePayrollControlPanelLogic(dateRanges) {
-                            return {
-                                selectedYear: null,
-                                rangeMode: null,
-
-                                init() {
-                                    this.selectedYear = new Date().getFullYear().toString();
-                                    this.rangeMode = "payPeriod";
-                                },
-                                getPayPeriodsForSelectedYear() {
-                                    return dateRanges[this.selectedYear]?.payPeriods || [];
-                                },
-
-                                getMonthsForSelectedYear() {
-                                    return dateRanges[this.selectedYear]?.months || [];
-                                }
-                            }
-                            }
-                        <script>
-                    
-                    - Good Example:
-                        <select class="col-span-3 w-full bg-slate-50 border">
-                            <template x-for="option in getDateRangeOptions()" :key="option">
-                                <option x-bind:value="option" x-text="option"></option>
-                            </template>
-                        </select>
-                        ...
-                        <script>
-                            function financePayrollControlPanelLogic(dateRanges) {
-                            return {
-                                selectedYear: null,
-                                rangeMode: null,
-
-                                init() {
-                                    this.selectedYear = new Date().getFullYear().toString();
-                                    this.rangeMode = "payPeriod";
-                                },
-
-                                getDateRangeOptions() {
-                                    if (this.rangeMode === 'month')
-                                        return dateRanges[this.selectedYear]?.months || [];
-
-                                    else if (this.rangeMode === 'payPeriod')
-                                        return dateRanges[this.selectedYear]?.payPeriods || [];
-                                },
-                            }
-                            }
-                        <script>
-
-                6) When calling a function defined in the Alpine Object, always call it with the "()" at the end of the function name to signify it is a function. This also means that we do NOT use the "get" keyword to name a getter function.
-                    - Bad Example:
-                        <select class="col-span-3 w-full bg-slate-50 border">
-                            <template x-for="option in dateRangeOptions" :key="option"> 
-                                <option x-bind:value="option" x-text="option"></option>
-                            </template>
-                        </select>
-                        ...
-                        <script>
-                            function financePayrollControlPanelLogic(dateRanges) {
-                            return {
-                                selectedYear: null,
-                                rangeMode: null,
-
-                                init() {
-                                    this.selectedYear = new Date().getFullYear().toString();
-                                    this.rangeMode = "payPeriod";
-                                },
-
-                                get dateRangeOptions() {
-                                    if (this.rangeMode === 'month')
-                                        return dateRanges[this.selectedYear]?.months || [];
-
-                                    else if (this.rangeMode === 'payPeriod')
-                                        return dateRanges[this.selectedYear]?.payPeriods || [];
-                                },
-                            }
-                            }
-                        <script>
-
-                    - Good Example:
-                        <select class="col-span-3 w-full bg-slate-50 border">
-                            <template x-for="option in getDateRangeOptions()" :key="option"> 
-                                <option x-bind:value="option" x-text="option"></option>
-                            </template>
-                        </select>
-                        ...
-                        <script>
-                            function financePayrollControlPanelLogic(dateRanges) {
-                            return {
-                                selectedYear: null,
-                                rangeMode: null,
-
-                                init() {
-                                    this.selectedYear = new Date().getFullYear().toString();
-                                    this.rangeMode = "payPeriod";
-                                },
-
-                                getDateRangeOptions() {
-                                    if (this.rangeMode === 'month')
-                                        return dateRanges[this.selectedYear]?.months || [];
-
-                                    else if (this.rangeMode === 'payPeriod')
-                                        return dateRanges[this.selectedYear]?.payPeriods || [];
-                                },
-                            }
-                            }
-                        <script>
-
-                7) Pass Server-Side Data Securely with @json for the initial load
-                    - Always use the @json Blade directive to pass PHP variables (especially arrays and objects) into your Alpine component's data for the initial load. These variables will almost always be coming from the parent blade view, passed in via props, that is instantiating the component. The parent blade view got the variable from the Controller
-                    
-                8) Laravel requires csrf tokens in fetch requests, so we must store them in a meta header so we can later include them in the fetch.
-
-            User Input Component Implementation Rules:
-                1) When defining the Alpine function for the User Input Object, the different sections should be in the following order:
-                    @push('scripts')
-                    <script>
-                            function financeControlPanelLogic(dateRanges) {
-                            return {
-                            1)Class/Instance Variables set to null
-                            2)init() {
-                                2a)initialize class/instance variables
-                                2b)define watchers
-                                }
-                            3)otherFunctions()
-                            4)dispatchChangeEvent()
-                            
-                        }
-                        }
-                    </script>
-                    @endpush
-
-                2) at the end of the init function in the User Input Component, manually dispatch an initial event to load the default data for all the display components. The display components should always get their default data from an initial dispatch, and not pre-loaded from the controller somehow. 
-                    - This must be done using nextTick to ensure the display components are ready.
-                    Good example:
-                        init() {
-                            // Initialize Instance Variables
-                            this.selectedYear = new Date().getFullYear().toString();
-                            this.selectedDateRange = this.getDateRangeOptions()[0] || null;
-                            this.activeFilters = ["active"]
-                            this.isUpdating = false;
-
-                            // Set up watchers //
-
-                            // selectedYear Watcher
-                            this.$watch('selectedYear', () => {
-                                this.isUpdating = true;
-                                const newOptions = this.getDateRangeOptions();
-                                this.selectedDateRange = newOptions[0] || null;
-                                this.dispatchChangeEvent();
-                                this.$nextTick(() => {
-                                    this.isUpdating = false;
-                                });
-                            });
-
-                            // selectedDateRange Watcher   
-                            this.$watch('selectedDateRange', () => {
-                                if (this.isUpdating) return; 
-
-                                this.dispatchChangeEvent()
-                            });
-                            
-                            // activeFilters Watcher 
-                            this.$watch('activeFilters', () => this.dispatchChangeEvent());
-
-                            // Fire initial dispatch event with default values
+                        // selectedYear Watcher
+                        this.$watch('selectedYear', () => {
+                            this.isUpdating = true;
+                            const newOptions = this.getDateRangeOptions();
+                            this.selectedDateRange = newOptions[0] || null;
+                            this.dispatchChangeEvent();
                             this.$nextTick(() => {
-                                this.dispatchChangeEvent();
+                                this.isUpdating = false;
                             });
-                        }
-                3) Use a Centralized Dispatch Function for Emitting Events from the user-input component
-                    - All component events fired with $dispatch should be wrapped in a dedicated function, typically named dispatchChangeEvent(). This function should be responsible for structuring the event payload.
-                    - Bad Example:
-                        // Multiple dispatch calls scattered in the code
-                        this.$watch('rangeMode', () => {
-                                // ... logic ...
-                                this.$dispatch('finance-panel-change', {
-                                    timeGranularity: this.rangeMode,
-                                    year: this.selectedYear,
-                                    dateRangeDropdown: this.selectedDateRange,
-                                    activeFilters: this.activeFilters
-                                });
                         });
 
-                        this.$watch('activeFilters', () => {
-                                // ... logic ...
-                                this.$dispatch('finance-panel-change', {
-                                    timeGranularity: this.rangeMode,
-                                    year: this.selectedYear,
-                                    dateRangeDropdown: this.selectedDateRange,
-                                    activeFilters: this.activeFilters
-                                });
-                        });
+                        // selectedDateRange Watcher   
+                        this.$watch('selectedDateRange', () => {
+                            if (this.isUpdating) return; 
 
-                    - Good Example:
-                        // All watchers and methods call a single dispatch function
-                        init() {
-                                this.$watch('rangeMode', () => {
-                                    // ... logic ...
-                                    this.dispatchChangeEvent();
-                                });
+                            this.dispatchChangeEvent()
+                        });
                         
-                                this.$watch('activeFilters', () => this.dispatchChangeEvent());
-                        },
+                        // activeFilters Watcher 
+                        this.$watch('activeFilters', () => this.dispatchChangeEvent());
 
-                        dispatchChangeEvent() {
-                                this.$dispatch('finance-panel-change', {
-                                    timeGranularity: this.rangeMode,
-                                    year: this.selectedYear,
-                                    dateRangeDropdown: this.selectedDateRange,
-                                    activeFilters: this.activeFilters
-                                });
-                        },
+                        // Fire initial dispatch event with default values
+                        this.$nextTick(() => {
+                            this.dispatchChangeEvent();
+                        });
+                    }
+            3) Use a Centralized Dispatch Function for Emitting Events from the user-input component
+                - All component events fired with $dispatch should be wrapped in a dedicated function, typically named dispatchChangeEvent(). This function should be responsible for structuring the event payload.
+                - Bad Example:
+                    // Multiple dispatch calls scattered in the code
+                    this.$watch('rangeMode', () => {
+                            // ... logic ...
+                            this.$dispatch('finance-panel-change', {
+                                timeGranularity: this.rangeMode,
+                                year: this.selectedYear,
+                                dateRangeDropdown: this.selectedDateRange,
+                                activeFilters: this.activeFilters
+                            });
+                    });
 
-                4) Safely Manage Watcher Side Effects with State Flags
-                    - When a watcher ($watch) modifies a reactive property that is itself being watched, use a boolean state flag (e.g., isUpdating, isLoading) to prevent infinite loops or unintended watcher execution. This will often arise when changing state of an element inside a component changes the state of another element inside the same component, and both have watchers that send out external events. 
-                    - Bad Example:
-                        // Bad Example - No flags, causes infinite loops and unpredictable behavior
-                        init() {
-                            // This watcher triggers when selectedYear changes
-                            this.$watch('selectedYear', () => {
-                                const newOptions = this.getDateRangeOptions();
-                                this.selectedDateRange = newOptions[0] || null; // This triggers the watcher below!
+                    this.$watch('activeFilters', () => {
+                            // ... logic ...
+                            this.$dispatch('finance-panel-change', {
+                                timeGranularity: this.rangeMode,
+                                year: this.selectedYear,
+                                dateRangeDropdown: this.selectedDateRange,
+                                activeFilters: this.activeFilters
+                            });
+                    });
+
+                - Good Example:
+                    // All watchers and methods call a single dispatch function
+                    init() {
+                            this.$watch('rangeMode', () => {
+                                // ... logic ...
                                 this.dispatchChangeEvent();
                             });
+                    
+                            this.$watch('activeFilters', () => this.dispatchChangeEvent());
+                    },
+
+                    dispatchChangeEvent() {
+                            this.$dispatch('finance-panel-change', {
+                                timeGranularity: this.rangeMode,
+                                year: this.selectedYear,
+                                dateRangeDropdown: this.selectedDateRange,
+                                activeFilters: this.activeFilters
+                            });
+                    },
+
+            4) Safely Manage Watcher Side Effects with State Flags
+                - When a watcher ($watch) modifies a reactive property that is itself being watched, use a boolean state flag (e.g., isUpdating, isLoading) to prevent infinite loops or unintended watcher execution. This will often arise when changing state of an element inside a component changes the state of another element inside the same component, and both have watchers that send out external events. 
+                - Bad Example:
+                    // Bad Example - No flags, causes infinite loops and unpredictable behavior
+                    init() {
+                        // This watcher triggers when selectedYear changes
+                        this.$watch('selectedYear', () => {
+                            const newOptions = this.getDateRangeOptions();
+                            this.selectedDateRange = newOptions[0] || null; // This triggers the watcher below!
+                            this.dispatchChangeEvent();
+                        });
+                        
+                        // This watcher triggers when selectedDateRange changes
+                        this.$watch('selectedDateRange', () => {
+                            this.dispatchChangeEvent(); // This runs even during programmatic updates
                             
-                            // This watcher triggers when selectedDateRange changes
-                            this.$watch('selectedDateRange', () => {
-                                this.dispatchChangeEvent(); // This runs even during programmatic updates
-                                
-                                // Even worse - if this watcher also modified selectedYear:
-                                // this.selectedYear = someNewValue; // Would create an infinite loop!
-                            });
-                        }
-                    - Good Example:
-                        init() {
-                            this.isUpdating = false;
+                            // Even worse - if this watcher also modified selectedYear:
+                            // this.selectedYear = someNewValue; // Would create an infinite loop!
+                        });
+                    }
+                - Good Example:
+                    init() {
+                        this.isUpdating = false;
 
-                            // This watcher TRIGGERS the controlled update
-                            this.$watch('selectedYear', () => {
-                                this.isUpdating = true; // 1. Set the flag
-                                
-                                const newOptions = this.getDateRangeOptions();
-                                this.selectedDateRange = newOptions[0] || null; // 2. This change would normally trigger the watcher below
-                                
-                                this.dispatchChangeEvent();
-                                
-                                this.$nextTick(() => {
-                                    this.isUpdating = false; // 4. Reset the flag after the DOM updates
+                        // This watcher TRIGGERS the controlled update
+                        this.$watch('selectedYear', () => {
+                            this.isUpdating = true; // 1. Set the flag
+                            
+                            const newOptions = this.getDateRangeOptions();
+                            this.selectedDateRange = newOptions[0] || null; // 2. This change would normally trigger the watcher below
+                            
+                            this.dispatchChangeEvent();
+                            
+                            this.$nextTick(() => {
+                                this.isUpdating = false; // 4. Reset the flag after the DOM updates
+                            });
+                        });
+
+                        // This watcher RESPECTS the controlled update
+                        this.$watch('selectedDateRange', () => {
+                            // 3. The flag prevents this watcher's logic from running during the update
+                            if (this.isUpdating) return; 
+
+                            this.dispatchChangeEvent();
+                        });
+                    }
+            5) Handling Unsaved Changes (Dirty State)
+                - If a page requires checking for unsaved changes before loading new data, this check must be performed "Just in Time" inside the `dispatchChangeEvent` or action functions (e.g., `navigateWeek`).
+                - **Do not** put the check inside getters or functions bound to `x-text` or `x-show`, as this will cause side effects (like alerts appearing) during simple re-renders.
+                - Example:
+                    dispatchChangeEvent() {
+                        // 1. Run the registry checks synchronously
+                        const isDirty = this.$store.financePayrollRegistry.isPageDirty();
+
+                        if (isDirty) {
+                            if (!confirm("You have unsaved changes. Loading new filters will discard them. Continue?")) {
+                                return; // Stop the dispatch
+                            }
+                        }
+
+                        // 2. Proceed with dispatch
+                        this.$dispatch('finance-panel-change', { ... });
+                    }
+        
+        Data-Bridge Implementation Rules:
+            1) The data-bridge component will always use the fetch API and not AJAX.
+
+            2) Laravel requires csrf tokens in fetch requests, so we must store them in a meta header so we can later include them in the fetch.
+
+            3) The data-bridge component will always have a comment at the top of the file that showcases the structure of the expected data it expects to recieve from the getData endpoint in the controller.
+
+            4) The Async function should always be called fetchData unless we need multiple (more than one synchronous group) and need to specify between them.
+                - If there are mutliple, they will always exist in one data-bridge with multiple fetch abilities, rather than mutliple data-bridges.
+            
+            5) Syntactically (variable name and code line structure) the Data-Bridge should here as close as possible to the generalzied example below:
+
+                {{-- Comment at the top describing structure of the data recived from the User Input Component and the structure of the data recieved from the fetch to the Controller--}}
+                <div
+                    x-data="dataBridge()"
+                    x-on:[user-input-component-name-here]-change.window="fetchData($event)"
+                    class="hidden"
+                ></div>
+
+                @push('scripts')
+                <script>
+                function dataBridge() {
+                    return {
+                        /**
+                        * @param {CustomEvent} event The event dispatched from the User Input Component.
+                        */
+                        async fetchData(event) {
+                            this.$dispatch('[feature]-data-loading');
+                            const userInputVariables = event.detail;
+
+                            try {
+                                // Perform a fetch request to our API endpoint
+                                const response = await fetch('/outerpath/innerpath/getdata', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'Accept': 'application/json',
+                                        // Laravel requires a CSRF token for POST requests
+                                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                                    },
+                                    body: JSON.stringify(userInputVariables)
                                 });
-                            });
 
-                            // This watcher RESPECTS the controlled update
-                            this.$watch('selectedDateRange', () => {
-                                // 3. The flag prevents this watcher's logic from running during the update
-                                if (this.isUpdating) return; 
+                                const payload = await response.json();
+                                // Dispatch a new event with the fetched data for other components
+                                this.$dispatch('[feature]-data-updated', payload);
 
-                                this.dispatchChangeEvent();
-                            });
+                            } catch (error) {
+                                this.$dispatch('[feature]-fetch-error', error.message);
+                            }
                         }
-
-
-    Data-Bridge Implementation Rules:
-        1) The data-bridge component will always use the fetch API and not AJAX.
-
-        2) The data-bridge component will always have a comment at the top of the file that showcases the structure of the expected data it expects to recieve from the getData endpoint in the controller.
-
-        3) The Async function should always be called fetchData unless we need multiple and need to specify between them.
-            - If there are mutliple, they will always exist in one data-bridge with multiple fetch abilities, rather than mutliple data-bridges. 
+                    }
+                }
+                </script>
+                @endpush
+        
+        Display Component:
+            1)The functions in the display components alpine object that handle loading and errors should be the last two functions in the display component's functions, in that order (update function, then error function)
     
-    Display Component:
-        1)The functions in the display components alpine object that handle loading and errors should be the last two functions in the display component's functions, in that order (update function, then error function)
-   
-        2) For display components, the listeners to the dispatch events should be defined in the order loading, data, and error, and should be on separate lines
-            Good Example:
-                <div x-data="PPQuickListLogic()" 
-                    @payroll-data-loading.window="handlePayrollFetchInitiated($event)"
-                    @payroll-data-updated.window="handlePayrollDataUpdate($event)"
-                    @payroll-fetch-error.window="handlePayrollError($event)"
+            2) For display components, the listeners to the dispatch events should be defined in the order loading, data, and error, and should be on separate lines
+                Good Example:
+                    <div x-data="PPQuickListLogic()" 
+                        @payroll-data-loading.window="handlePayrollFetchInitiated($event)"
+                        @payroll-data-updated.window="handlePayrollDataUpdate($event)"
+                        @payroll-fetch-error.window="handlePayrollFetchError($event)"
+                        ...
+                    </div>
+            3) As a reminder, there are two types of errors a display component could recieve. It could reicieve an ApiResponse Object with errors instead of data, or there could be some sort of network error, which would trigger the data-bridge to send out a custom event called [feature]-fetch-error.
+                - To Handle this, there will be two functions, both of which will result in the display components error state being displayed.
+                - There will be a generall function called "handleError(errorMessage) which will handle all the logic for handeling the error and having the display component show its error state. Here is an example of it being called:
+                handlePayrollDataUpdate(event) {    
+                    // 1. Extract the specific payload for THIS component
+                    const responseObj = event.detail.tableData;
+
+                    // Safety check: if controller didn't return this key for some reason
+                    if (!responseObj) {
+                        this.handleError("Invalid response format");
+                        return;
+                    }
+
+                    // 2. Check for Component-Specific Error (ApiResponse::error)
+                    if (responseObj.errors) {
+                        this.handleError(responseObj.errors);
+                        return;
+                    }
+                }
                     ...
-                </div>
+                    
+                handleError(errorMessage) {
+                    this.error = errorMessage
+                    this.tableData = [];
+                    this.summaryRows = [];
+                    this.isLoading = false;
+                },
+                ...
+
+                There will also then be the function called that is listening for the [feature]-fetch-error and this will get the message from the event and then call handleError(errorMessage):
+                
+                handlePayrollFetchError(event) {
+                    const errorMessage = event.detail;
+                    this.handleError(errorMessage);
+                },
+            
+            4) Registering Dirty State Checks:
+                - If a display component allows user modification that could be saved to the backend, it must register a callback function with the local Alpine registry store inside its `init()` method.
+                - This callback should return `true` if the component has unsaved changes and `false` otherwise.
+                Example:
+                    init() {
+                        // ... other init logic ...
+                        2a:
+                        2b:
+                        // Register dirty check using arrow function to preserve 'this' context
+                        new 2c: this.$store.financePayrollRegistry.registerDirtyCheck(() => this.hasUnsavedChanges());
+                    },
+                    
+                    hasUnsavedChanges() {
+                        if (this.isLoading) return false;
+                        return JSON.stringify(this.rows) !== JSON.stringify(this.pristineRows);
+                    },
+
+        General Alpine Rules:
+            1) Do not define the Alpine object within the x-data, but instead, define it in a separate script tag at the bottom of the component file. The name of the function called should be the CamelCase path to the component file followed by the word "Logic". See the example below for the user input component of the payroll page for the finance team:
+            
+            <div x-data='financePayrollControlPanelLogic(@json($phpVarFromProps))'>
+                ...
+            </div>
+
+            @push('scripts')
+            <script>
+                    function financePayrollCOntrolPanelLogic(dateRanges) {
+                    return {
+                    <Alpine Object vars and functions here>
+                }
+                }
+            </script>
+            @endpush
+
+            2) Always use the full x-bind:attribute="<some JavaScript Expression here>" instead of :attribute="<some JavaScript Expression here>"
+                - this is because In Laravel, we use the ":" character to pass PHP expressions to Blade Components as props, and having them both in there can feel confusing
+
+            3) Always set any class/instance variables for the alpine object to null and then initialize them in the first part of the init() function
+                Example:
+                    function financePayrollControlPanelLogic(dateRanges) {
+                        return {
+                            selectedYear:  null,
+                            selectedDateRange: null,
+                            activeFilters: null,
+                            isUpdating: null,
+
+                            init() {
+                                // Initialize Instance Variables
+                                this.selectedYear = new Date().getFullYear().toString();
+                                this.selectedDateRange = this.getDateRangeOptions()[0] || null;
+                                this.activeFilters = ["active"]
+                                this.isUpdating = false;
+                                ...
+                            }
+                        }
+                    }
+            4) When you are conditionally setting the TailWind classes of an html element using x-bind:class="", if possible use the ternary, operator. If not, use Object Syntax:
+                - Example if ternary possible:
+                    x-bind:class="activeFilters.includes(filter) ? 'bg-slate-700 text-white font-semibold' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'"
+
+                -Example if not possible:
+                    x-bind:class="{
+                        'bg-green-500 text-white': status === 'success',
+                        'bg-yellow-500 text-black': status === 'warning', 
+                        'bg-red-500 text-white': status === 'error',
+                        'bg-gray-500 text-white': status === 'pending'
+                        }"
+            5) When using <template> elements inside x-for blocks, if what is being populated needs to dynamically change, try to use just one template chunk with a function instead of multiple
+                - Bad Example:
+                    <select class="col-span-3 w-full bg-slate-50 border">
+                        <template x-if="rangeMode === 'month'">
+                            <template x-for="month in monthsForSelectedYear" :key="month">
+                                <option x-bind:value="month" x-text="month"></option>
+                            </template>
+                        </template>
+                        <template x-if="rangeMode === 'payPeriod'">
+                            <template x-for="pp in payPeriodsForSelectedYear" :key="pp">
+                                <option x-bind:value="pp" x-text="pp"></option>
+                            </template>
+                        </template>
+                    </select>
+                    ...
+                    <script>
+                        function financePayrollControlPanelLogic(dateRanges) {
+                        return {
+                            selectedYear: null,
+                            rangeMode: null,
+
+                            init() {
+                                this.selectedYear = new Date().getFullYear().toString();
+                                this.rangeMode = "payPeriod";
+                            },
+                            getPayPeriodsForSelectedYear() {
+                                return dateRanges[this.selectedYear]?.payPeriods || [];
+                            },
+
+                            getMonthsForSelectedYear() {
+                                return dateRanges[this.selectedYear]?.months || [];
+                            }
+                        }
+                        }
+                    <script>
+                
+                - Good Example:
+                    <select class="col-span-3 w-full bg-slate-50 border">
+                        <template x-for="option in getDateRangeOptions()" :key="option">
+                            <option x-bind:value="option" x-text="option"></option>
+                        </template>
+                    </select>
+                    ...
+                    <script>
+                        function financePayrollControlPanelLogic(dateRanges) {
+                        return {
+                            selectedYear: null,
+                            rangeMode: null,
+
+                            init() {
+                                this.selectedYear = new Date().getFullYear().toString();
+                                this.rangeMode = "payPeriod";
+                            },
+
+                            getDateRangeOptions() {
+                                if (this.rangeMode === 'month')
+                                    return dateRanges[this.selectedYear]?.months || [];
+
+                                else if (this.rangeMode === 'payPeriod')
+                                    return dateRanges[this.selectedYear]?.payPeriods || [];
+                            },
+                        }
+                        }
+                    <script>
+
+            6) When calling a function defined in the Alpine Object, always call it with the "()" at the end of the function name to signify it is a function. This also means that we do NOT use the "get" keyword to name a getter function.
+                - Bad Example:
+                    <select class="col-span-3 w-full bg-slate-50 border">
+                        <template x-for="option in dateRangeOptions" :key="option"> 
+                            <option x-bind:value="option" x-text="option"></option>
+                        </template>
+                    </select>
+                    ...
+                    <script>
+                        function financePayrollControlPanelLogic(dateRanges) {
+                        return {
+                            selectedYear: null,
+                            rangeMode: null,
+
+                            init() {
+                                this.selectedYear = new Date().getFullYear().toString();
+                                this.rangeMode = "payPeriod";
+                            },
+
+                            get dateRangeOptions() {
+                                if (this.rangeMode === 'month')
+                                    return dateRanges[this.selectedYear]?.months || [];
+
+                                else if (this.rangeMode === 'payPeriod')
+                                    return dateRanges[this.selectedYear]?.payPeriods || [];
+                            },
+                        }
+                        }
+                    <script>
+
+                - Good Example:
+                    <select class="col-span-3 w-full bg-slate-50 border">
+                        <template x-for="option in getDateRangeOptions()" :key="option"> 
+                            <option x-bind:value="option" x-text="option"></option>
+                        </template>
+                    </select>
+                    ...
+                    <script>
+                        function financePayrollControlPanelLogic(dateRanges) {
+                        return {
+                            selectedYear: null,
+                            rangeMode: null,
+
+                            init() {
+                                this.selectedYear = new Date().getFullYear().toString();
+                                this.rangeMode = "payPeriod";
+                            },
+
+                            getDateRangeOptions() {
+                                if (this.rangeMode === 'month')
+                                    return dateRanges[this.selectedYear]?.months || [];
+
+                                else if (this.rangeMode === 'payPeriod')
+                                    return dateRanges[this.selectedYear]?.payPeriods || [];
+                            },
+                        }
+                        }
+                    <script>
+
+            7) Pass Server-Side Data Securely with @json for the initial load
+                - Always use the @json Blade directive to pass PHP variables (especially arrays and objects) into your Alpine component's data for the initial load. These variables will almost always be coming from the parent blade view, passed in via props, that is instantiating the component. The parent blade view got the variable from the Controller
+
 
 Database (MongoDB) rules and structure:
 

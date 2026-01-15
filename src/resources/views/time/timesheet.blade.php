@@ -17,10 +17,13 @@
         <x-general.simple-stat
             title="Prev Pay-Period Status"
             dataKey="prevPayPeriodStatus"
-            format="number"
-            iconClasses="bg-purple-100 text-purple-700"
+            format="string"
+            iconClasses="bg-green-100 text-green-700"
+            failClasses="bg-red-100 text-red-700"
             iconName="pastClock"
-            eventPrefix="stats-data"
+            eventPrefix="timesheet"
+            :successCondition="json_encode(['type' => 'equals', 'value' => 'complete'])"
+            
         />
         
         <x-general.simple-stat 
@@ -29,16 +32,16 @@
             format="number"
             iconClasses="bg-blue-100 text-blue-700"
             iconName="calendar"
-            eventPrefix="stats-data"
+            eventPrefix="timesheet"
         />
 
         <x-general.simple-stat 
             title="Current Pay-Period Hours"
             dataKey="currentPayPeriodHours"
             format="hours"
-            iconClasses="bg-green-100 text-green-700"
+            iconClasses="bg-purple-100 text-purple-700"
             iconName="simpleClock"
-            eventPrefix="stats-data"
+            eventPrefix="timesheet"
         />
 
     </div>
@@ -58,6 +61,22 @@
     {{-- Add the error modal component here --}}
     <x-general.error-modal />
 
-@stack('scripts')
+ <script>
+        document.addEventListener('alpine:init', () => {
+            Alpine.store('timesheetPageRegistry', {
+                checks: [],
+                registerDirtyCheck(callbackFunction) {
+                    this.checks.push(callbackFunction);
+                },
+                isPageDirty() {
+                    return this.checks.some(checkFn => checkFn());
+                }
+            });
+        });
+    </script>
+
+    @stack('scripts')
+
 </body>
+
 </html>

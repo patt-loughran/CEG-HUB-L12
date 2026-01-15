@@ -5,7 +5,7 @@
     It listens for events from the data-bridge component to update its state.
     - @payroll-data-loading.window: Shows a loading skeleton.
     - @payroll-data-updated.window: Receives data and displays the table.
-    - @payroll-data-error.window: Shows an error message.
+    - @payroll-fetch-error.window: Shows an error message.
 
     This component handles its own client-side sorting.
     It now includes a responsive design, showing a card-based view on mobile (screens < lg)
@@ -15,7 +15,7 @@
 <div x-data="payrollTableLogic()" 
     @payroll-data-loading.window="handlePayrollFetchInitiated()"
     @payroll-data-updated.window="handlePayrollDataUpdate($event)"
-    @payroll-fetch-error.window="handlePayrollError($event)"
+    @payroll-fetch-error.window="handlePayrollFetchError($event)"
     @process-export.window="handleExport($event)"
     class="bg-white rounded-lg shadow-sm border border-slate-200 flex flex-col flex-1 min-h-[320px] max-w-full relative overflow-hidden">
       
@@ -77,7 +77,7 @@
              <div class="text-center p-8 lg:p-16 flex flex-col items-center justify-center h-full">
                 <svg class="mx-auto h-16 w-16 text-red-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>
                 <h3 class="mt-4 text-lg font-semibold text-red-800">An Error Occurred</h3>
-                <p class="mt-2 text-sm text-slate-600" x-text="error.message || 'The server could not process the request.'"></p>
+                <p class="mt-2 text-sm text-slate-600" x-text="error || 'The server could not process the request.'"></p>
                 <p class="mt-1 text-xs text-slate-400">Try changing a filter to fetch the data again.</p>
             </div>
         </template>
@@ -339,25 +339,18 @@
 
                 // Safety check: if controller didn't return this key for some reason
                 if (!responseObj) {
-                    this.handlePayrollError({ detail: { message: "Invalid response format" } });
+                    this.handleError("Invalid response format");
                     return;
                 }
 
                 // 2. Check for Component-Specific Error (ApiResponse::error)
                 if (responseObj.errors) {
-                    this.error = { message: responseObj.errors }; // Display the specific error message
-                    this.tableData = []; 
-                    this.summaryRows = [];
-                    this.isLoading = false;
+                    this.handleError(responseObj.errors);
                     return;
                 }
 
                 // 3. Handle Success (ApiResponse::success)
-                // Note: We access .data twice. 
-                // First .data is the ApiResponse getter. 
-                // Second .tableData/.summaryRows are the keys inside your specific return array.
                 const payload = responseObj.data; 
-
                 this.tableData = payload.tableData;
                 this.summaryRows = payload.summaryRows;
                 this.payPeriodIdentifier = payload.payPeriodIdentifier;
@@ -366,10 +359,13 @@
                 this.error = null;
             },
 
-            handlePayrollError(event) {
-                // CHANGE 3: Handle Global/Network Errors
-                // This triggers on 500s or Network Timeouts caught by DataBridge
-                this.error = event.detail;
+            handlePayrollFetchError(event) {
+                const errorMessage = event.detail;
+                this.handleError(errorMessage);
+            },
+
+            handleError(errorMessage) {
+                this.error = errorMessage
                 this.tableData = [];
                 this.summaryRows = [];
                 this.isLoading = false;

@@ -44,27 +44,19 @@
     }
 --}}
 <div x-data="timeDataBridgeLogic()"
-     @timesheet-date-change.window="fetchData($event.detail)"
-     @save-timesheet.window="saveTimesheet($event.detail)">
+     @timesheet-date-change.window="fetchData($event)"
+     @save-timesheet.window="saveTimesheet($event)"
+     @timesheet-load-recent.window="fetchRecentRows($event)">
 </div>
 
 @push('scripts')
 <script>
     function timeDataBridgeLogic() {
         return {
-            isLoading: null,
-            error: null,
-
-            init() {
-                this.isLoading = false;
-                this.error = null;
-            },
-
-            async fetchData(payPeriodData) {
+            async fetchData(event) {
                 // 1. Dispatch loading event for immediate UI feedback
                 this.$dispatch('timesheet-data-loading');
-                this.isLoading = true;
-                this.error = null;
+                const userInputVariables = event.detail;
 
                 try {
                     // 2. Send fetch request to the backend
@@ -74,38 +66,23 @@
                             'Content-Type': 'application/json',
                             'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
                         },
-                        body: JSON.stringify(payPeriodData)
+                        body: JSON.stringify(userInputVariables)
                     });
 
-                    if (!response.ok) {
-                        // Handles network or server errors (e.g., 500, 404)
-                        throw new Error(`Server error: ${response.status} ${response.statusText}`);
-                    }
+                    const payload = await response.json();
 
-                    const data = await response.json();
+                    this.$dispatch('timesheet-data-updated', payload);
 
-                    // 3. Check for application-level errors returned by the controller
-                    if (data.timesheetData && data.timesheetData.success === false) {
-                        throw new Error(data.timesheetData.errors || 'An unknown error occurred while fetching data.');
-                    }
-
-                    // 4. Dispatch the entire successful payload.
-                    // Listening components can now access `event.detail.timesheetData` or `event.detail.statsData`.
-                    this.$dispatch('timesheet-data-updated', data.timesheetData);
-                    this.$dispatch('stats-data-updated', data.statsData)
-
-                } catch (e) {
+                } catch (error) {
                     // 5. Dispatch a single, consistent error event for all components
-                    console.error("Timesheet fetch error:", e);
-                    this.error = e.message;
-                    this.$dispatch('timesheet-data-error', { message: this.error });
-                } finally {
-                    this.isLoading = false;
+                    console.error("Timesheet fetch error:", error.message);
+                    this.$dispatch('timesheet-fetch-error', error.message);
                 }
             },
 
-            async saveTimesheet(Data) {
+            async saveTimesheet(event) {
               try {
+                const payload = event.detail;
                 // 2. Send fetch request to the backend
                 const response = await fetch('/time/timesheet/save', {
                     method: 'POST',
@@ -113,7 +90,7 @@
                         'Content-Type': 'application/json',
                         'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
                     },
-                    body: JSON.stringify(Data)
+                    body: JSON.stringify(payload)
                 });
 
                 if (!response.ok) {
@@ -124,7 +101,7 @@
                 const responseFromController = await response.json();
 
                 // 3. Check for application-level errors returned by the controller
-                if (ResponseFromController.success === false) {
+                if (responseFromController.success === false) {
                     throw new Error(responseFromController.errors || 'An unknown error occurred while fetching data.');
                 }
 
@@ -132,14 +109,37 @@
                 // Listening components can now access `event.detail.timesheetData` or `event.detail.statsData`.
                 this.$dispatch('timesheet-data-saved');
 
-            } catch (e) {
-                // 5. Dispatch a single, consistent error event for all components
-                console.error("Timesheet save error:", e);
-                this.error = e.message;
-                this.$dispatch('timesheet-save-error', { message: this.error });
-            } finally {
+              } catch (e) {
+                  // 5. Dispatch a single, consistent error event for all components
+                  console.error("Timesheet save error:", e);
+                  this.error = e.message;
+                  this.$dispatch('timesheet-save-error', { message: this.error });
+                }
+            },
+
+          async fetchRecentRows(event) {
+                const payload = event.detail; // { referenceDate: 'Y-m-d', weeksBack: int }
+
+                try {
+                    const response = await fetch('/time/timesheet/recent', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                        },
+                        body: JSON.stringify(payload)
+                    });
+
+                    const data = await response.json();
+                    
+                    // Dispatch specific event for the display component to merge data
+                    this.$dispatch('timesheet-recent-loaded', data);
+
+                } catch (error) {
+                    console.error("Recent rows fetch error:", error.message);
+                    this.$dispatch('timesheet-fetch-error', error.message);
+                }
             }
-          }
         }
     }
 </script>

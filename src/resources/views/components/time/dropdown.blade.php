@@ -64,6 +64,10 @@
                         window.removeEventListener('resize', this.boundReposition);
                     }
                 });
+
+                console.log('row is:', this.row);
+    console.log('dropdownData is:', this.dropdownData);
+    console.log('Is row own property?', this.hasOwnProperty('row'));
             },
 
             openDropdown() {
@@ -124,7 +128,6 @@
                 this.closeDropdown();
             },
             filteredOptions() {
-                console.log("in filteredOptions()");
                 if (this.cellType === 'project_code') {
                     console.log("for project_code");
                     const projectCodes = Object.keys(this.dropdownData || {});

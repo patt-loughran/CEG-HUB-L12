@@ -8,13 +8,15 @@
     - `{{eventPrefix}}-data-updated`: Receives data and displays the value.
     - `{{eventPrefix}}-fetch-error`: Shows an error state.
 
-    Props:
-    - title: The text label for the statistic (e.g., "Total Hours").
-    - dataKey: The key to look for in the data payload (e.g., "totalHours").
-    - format: How to format the value ('hours', 'percentage', 'number').
-    - iconClasses: Tailwind CSS classes for the icon background and color.
+      Props:
+    - title: The text label for the statistic.
+    - dataKey: The key to look for in the data payload.
+    - format: How to format the value ('hours', 'percentage', 'number', 'string').
+    - iconClasses: Tailwind CSS classes for the icon (used when condition passes).
     - iconName: The name of the icon to use.
-    - eventPrefix: The prefix for the window events to listen for (e.g., "payroll-data").
+    - eventPrefix: The prefix for the window events to listen for.
+    - successCondition: JSON object defining when to show success state (optional).
+    - failClasses: Classes to use when condition fails (optional).
 --}}
 @props([
     'title',
@@ -22,14 +24,16 @@
     'eventPrefix', 
     'format' => 'number',
     'iconClasses' => 'bg-slate-100 text-slate-700',
-    'iconName'
+    'iconName',
+    'successCondition' => null,
+    'failClasses' => 'bg-red-100 text-red-700'
 ])
 
 {{-- HTML Structure --}}
-<div x-data="simpleStatLogic('{{ $dataKey }}', '{{ $format }}')"
+<div x-data="simpleStatLogic('{{ $dataKey }}', '{{ $format }}', {{ $successCondition ? $successCondition : 'null' }})"
     x-on:{{ $eventPrefix }}-data-loading.window="handleFetchInitiated()"
     x-on:{{ $eventPrefix }}-data-updated.window="handleDataUpdate($event)"
-    x-on:{{ $eventPrefix }}-fetch-error.window="handleError()"
+    x-on:{{ $eventPrefix }}-fetch-error.window="handleFetchError()"
     class="relative bg-white p-4 border border-slate-200 rounded-lg shadow-sm flex items-center gap-4 flex-1 min-w-[280px]">
 
     {{-- Skeleton State --}}
@@ -46,7 +50,7 @@
     {{-- Data State --}}
     <template x-if="!isLoading">
         <div class="flex items-center gap-4 w-full">
-            <div x-bind:class="error ? 'bg-red-100 text-red-700' : '{{ $iconClasses }}'"
+            <div x-bind:class="getIconClasses('{{ $iconClasses }}', '{{ $failClasses }}')"
                  class="flex-shrink-0 w-16 h-16 rounded-lg flex items-center justify-center transition-colors">
                 <template x-if="error">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-8 w-8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" /></svg>
@@ -71,31 +75,88 @@
 </div>
 
 {{-- Script Logic --}}
-
 @once
     @push('scripts')
     <script>
-        function simpleStatLogic(dataKey, format) {
+        function simpleStatLogic(dataKey, format, successCondition) {
             return {
                 value: null,
                 isLoading: null,
                 error: null,
+                condition: successCondition,
 
                 init() {
-                    this.value = 0;
+                    this.value = format === 'string' ? '' : 0;
                     this.isLoading = true;
                     this.error = false;
                 },
 
                 formattedValue() {
                     if (this.error) return '--';
-                    if (this.value === null || this.value === undefined) return '0';
+                    if (this.value === null || this.value === undefined) {
+                        return format === 'string' ? '' : '0';
+                    }
                     
                     switch (format) {
                         case 'hours': return Number(this.value).toFixed(2);
                         case 'percentage': return `${Number(this.value).toFixed(1)}%`;
+                        case 'string': return String(this.value);
                         case 'number': default: return Number(this.value).toLocaleString('en-US');
                     }
+                },
+
+                /**
+                 * Evaluates whether the current value passes the success condition.
+                 * 
+                 * Supported condition types:
+                 * - { type: 'equals', value: 'submitted' }        → string/number equals
+                 * - { type: 'not_equals', value: 'pending' }      → string/number not equals
+                 * - { type: 'in', values: ['a', 'b', 'c'] }       → value is in array
+                 * - { type: 'not_in', values: ['x', 'y'] }        → value is not in array
+                 * - { type: 'min', value: 80 }                    → number >= value
+                 * - { type: 'max', value: 100 }                   → number <= value
+                 * - { type: 'range', min: 0, max: 40 }            → number between min and max (inclusive)
+                 * - { type: 'gt', value: 0 }                      → number > value
+                 * - { type: 'lt', value: 100 }                    → number < value
+                 */
+                evaluateCondition() {
+                    if (!this.condition) return true; // No condition = always success
+                    
+                    const val = this.value;
+                    const c = this.condition;
+                    
+                    switch (c.type) {
+                        // String/exact comparisons
+                        case 'equals':
+                            return String(val).toLowerCase() === String(c.value).toLowerCase();
+                        case 'not_equals':
+                            return String(val).toLowerCase() !== String(c.value).toLowerCase();
+                        case 'in':
+                            return c.values.map(v => String(v).toLowerCase()).includes(String(val).toLowerCase());
+                        case 'not_in':
+                            return !c.values.map(v => String(v).toLowerCase()).includes(String(val).toLowerCase());
+                        
+                        // Numeric comparisons
+                        case 'min':
+                            return Number(val) >= Number(c.value);
+                        case 'max':
+                            return Number(val) <= Number(c.value);
+                        case 'range':
+                            return Number(val) >= Number(c.min) && Number(val) <= Number(c.max);
+                        case 'gt':
+                            return Number(val) > Number(c.value);
+                        case 'lt':
+                            return Number(val) < Number(c.value);
+                        
+                        default:
+                            console.warn(`Unknown condition type: ${c.type}`);
+                            return true;
+                    }
+                },
+
+                getIconClasses(successClasses, failClasses) {
+                    if (this.error) return 'bg-red-100 text-red-700';
+                    return this.evaluateCondition() ? successClasses : failClasses;
                 },
 
                 handleFetchInitiated() {
@@ -108,7 +169,7 @@
 
                     if (!responseObj) {
                         console.warn(`Stat Component: Key '${dataKey}' missing in payload`);
-                        this.handleError(); 
+                        this.handleFetchError(); 
                         return;
                     }
 
@@ -123,7 +184,7 @@
                     this.error = false;
                 },
 
-                handleError() {
+                handleFetchError() {
                     this.isLoading = false;
                     this.error = true;
                 }

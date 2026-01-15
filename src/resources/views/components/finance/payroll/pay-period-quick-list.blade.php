@@ -1,11 +1,11 @@
 <div x-data="PPQuickListLogic()" 
      @payroll-data-loading.window="handlePayrollFetchInitiated($event)"
      @payroll-data-updated.window="handlePayrollDataUpdate($event)"
-     @payroll-fetch-error.window="handlePayrollError($event)" {{-- CHANGE: Updated Event Name --}}
+     @payroll-fetch-error.window="handlePayrollFetchError($event)"
      class="bg-white p-6 border border-slate-300 rounded-lg shadow-sm flex-1 flex flex-col min-h-[320px] overflow-hidden">
     
     <!-- Actual Content -->
-    <template x-if="!isLoading && !error"> {{-- CHANGE: Added !error check here to prevent flicker --}}
+    <template x-if="!isLoading && !error">
         <div class="flex-1 flex flex-col overflow-hidden">
             <!-- Header -->
             <div class="flex justify-between items-center">
@@ -106,15 +106,13 @@
                 const responseObj = event.detail.tableData;
 
                 if (!responseObj) {
-                     this.handlePayrollError({ detail: { message: "Invalid response format" } });
+                     this.handleError("Invalid response format");
                      return;
                 }
 
                 // 2. Check for Component Error
                 if (responseObj.errors) {
-                    this.error = responseObj.errors;
-                    this.employeeHoursData = [];
-                    this.isLoading = false;
+                    handleError(responseObj.errors)
                     return;
                 }
 
@@ -129,11 +127,15 @@
                 this.error = null;
             },
 
-            handlePayrollError(event) {
-                // This handles Global/Network errors (500s or timeouts)
+            handlePayrollFetchError(event) {
+                const errorMessage = event.detail;
+                handleError(errorMessage);
+            },
+
+            handleError(errorMessage) {
                 this.isLoading = false;
                 this.employeeHoursData = []; 
-                this.error = event.detail?.message || 'An unknown error occurred.';
+                this.error = errorMessage;
             },
 
             getSortedEmployeeHoursData() {
