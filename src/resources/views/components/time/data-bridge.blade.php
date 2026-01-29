@@ -70,8 +70,10 @@
                     });
 
                     const payload = await response.json();
-
-                    this.$dispatch('timesheet-data-updated', payload);
+                    const recievedSeqNum = payload.sequenceNum;
+                    if (recievedSeqNum === this.$store.timesheetPageRegistry.sequenceNum) {
+                        this.$dispatch('timesheet-data-updated', payload);
+                    }
 
                 } catch (error) {
                     // 5. Dispatch a single, consistent error event for all components
@@ -82,7 +84,11 @@
 
             async saveTimesheet(event) {
               try {
+                // 1. Dispatch global loading if you want the UI to freeze/show spinner (optional but recommended)
+                // this.$dispatch('timesheet-data-loading'); 
+
                 const payload = event.detail;
+                
                 // 2. Send fetch request to the backend
                 const response = await fetch('/time/timesheet/save', {
                     method: 'POST',
@@ -94,26 +100,25 @@
                 });
 
                 if (!response.ok) {
-                    // Handles network or server errors (e.g., 500, 404)
                     throw new Error(`Server error: ${response.status} ${response.statusText}`);
                 }
 
-                const responseFromController = await response.json();
+                const result = await response.json();
 
-                // 3. Check for application-level errors returned by the controller
-                if (responseFromController.success === false) {
-                    throw new Error(responseFromController.errors || 'An unknown error occurred while fetching data.');
+                // 3. Check ApiResult success status
+                if (!result.success) {
+                    // result.errors contains the error message
+                    throw new Error(result.errors || 'An unknown error occurred while saving.');
                 }
 
-                // 4. Dispatch the entire successful payload.
-                // Listening components can now access `event.detail.timesheetData` or `event.detail.statsData`.
+                // 4. Dispatch success event
+                // No data payload needed as ApiResult only indicates success
                 this.$dispatch('timesheet-data-saved');
 
               } catch (e) {
-                  // 5. Dispatch a single, consistent error event for all components
                   console.error("Timesheet save error:", e);
-                  this.error = e.message;
-                  this.$dispatch('timesheet-save-error', { message: this.error });
+                  // 5. Dispatch error event
+                  this.$dispatch('timesheet-save-error', e.message);
                 }
             },
 

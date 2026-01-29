@@ -64,13 +64,17 @@
  <script>
         document.addEventListener('alpine:init', () => {
             Alpine.store('timesheetPageRegistry', {
+                // allows us to check for unsaved changes
                 checks: [],
                 registerDirtyCheck(callbackFunction) {
                     this.checks.push(callbackFunction);
                 },
                 isPageDirty() {
                     return this.checks.some(checkFn => checkFn());
-                }
+                },
+
+                // allows us to reject any later responses from earlier data
+                sequenceNum: @js($sequenceNum)
             });
         });
     </script>

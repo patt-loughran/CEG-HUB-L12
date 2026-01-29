@@ -44,7 +44,7 @@
                     <button
                         type="button"
                         @click="toggleFilter(filter)"
-                        x-bind:class="activeFilters.includes(filter) 
+                        x-bind:class="activeFilter === filter 
                             ? 'bg-slate-700 text-white font-semibold' 
                             : 'bg-slate-200 text-slate-600 hover:bg-slate-300'"
                         class="px-3 py-1 text-sm rounded-full transition"
@@ -64,14 +64,14 @@
         return {
             selectedYear:  null,
             selectedDateRange: null,
-            activeFilters: null,
+            activeFilter: null,
             isUpdating: null,
 
             init() {
                 // Initialize Instance Variables
                 this.selectedYear = new Date().getFullYear().toString();
                 this.selectedDateRange = this.getDateRangeOptions()[0] || null;
-                this.activeFilters = []
+                this.activeFilter = null;
                 this.isUpdating = false;
 
                 // Set up watchers //
@@ -94,8 +94,8 @@
                     this.dispatchChangeEvent()
                 });
                 
-                // activeFilters Watcher 
-                this.$watch('activeFilters', () => this.dispatchChangeEvent());
+                // activeFilter Watcher 
+                this.$watch('activeFilter', () => this.dispatchChangeEvent());
 
                 // Fire initial dispatch event with default values
                 this.$nextTick(() => {
@@ -113,23 +113,18 @@
             },
 
             toggleFilter(filter) {
-                const index = this.activeFilters.indexOf(filter);
-                if (index === -1) {
-                    this.activeFilters.push(filter);
-                } else {
-                    this.activeFilters.splice(index, 1);
-                }
+                this.activeFilter = this.activeFilter === filter ? null : filter;
             },
 
             dispatchChangeEvent() {
                 console.log("dispatched");
                 console.log(this.selectedYear);
                 console.log(this.selectedDateRange);
-                console.log(this.activeFilters);
+                console.log(this.activeFilter);
                 this.$dispatch('control-panel-change', {
                     year: this.selectedYear,
                     dateRangeDropdown: this.selectedDateRange,
-                    activeFilters: this.activeFilters
+                    activeFilter: this.activeFilter
                 });
             },
         }

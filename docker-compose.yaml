@@ -37,10 +37,6 @@ services:
     container_name: mongodb
     ports:
       - "9999:27017"
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: password
-      MONGO_INITDB_DATABASE: ceg_hub_database
     volumes:
       - mongodb_data:/data/db
       - ./prod_data:/prod_data
@@ -48,6 +44,22 @@ services:
     networks:
       - main-network
     restart: unless-stopped
+    # 1. Start as a Replica Set named 'rs0'
+    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27017"]
+
+    # 2. Auto-initialize the Replica Set
+    healthcheck:
+      test: |
+        mongosh --port 27017 --quiet --eval "
+        try {
+          rs.status().ok
+        } catch (e) {
+          rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongodb:27017'}]}).ok
+        }"
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
 
 
  # Node.js Service for Vite

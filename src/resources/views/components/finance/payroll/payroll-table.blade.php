@@ -294,11 +294,23 @@
                 }
             },
 
+            getLastName(name) {
+                const parts = name.trim().split(/\s+/);
+                return parts[parts.length - 1] || '';
+            },
+
             sortedData() {
                 if (!this.tableData) return [];
                 return [...this.tableData].sort((a, b) => {
-                    const aValue = a[this.sortColumn];
-                    const bValue = b[this.sortColumn];
+                    let aValue = a[this.sortColumn];
+                    let bValue = b[this.sortColumn];
+                    
+                    // Sort by last name when sorting by employee_name
+                    if (this.sortColumn === 'employee_name') {
+                        aValue = this.getLastName(aValue);
+                        bValue = this.getLastName(bValue);
+                    }
+                    
                     const direction = this.sortDirection === 'asc' ? 1 : -1;
                     if (typeof aValue === 'string') return aValue.localeCompare(bValue) * direction;
                     if (typeof aValue === 'number') return (aValue - bValue) * direction;

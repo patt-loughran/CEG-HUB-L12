@@ -8,17 +8,18 @@
 --}}
 <div x-data='timeTimesheetDateNavigatorLogic(@json($dateNavigatorData))'>
     <div class="flex items-center rounded-md border border-slate-300 shadow-sm">
-        <button @click="navigateWeek(-1)" title="Previous Week" class="rounded-l-md border-r border-slate-300 p-2 text-slate-500 hover:bg-slate-100">
+        <button @click="navigateWeek(-1)" title="Previous Week" :disabled="!canNavigatePrev()" :class="{ 'opacity-50 cursor-not-allowed': !canNavigatePrev() }" class="rounded-l-md border-r border-slate-300 p-2 text-slate-500 hover:bg-slate-100">
             <x-general.icon name="leftChevron" class="w-5 h-5 text-slate-500" />
         </button>
         
         <div class="relative">
-            <button @click="showWeekSelector = !showWeekSelector" class="flex w-40 items-center justify-between bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+            <button @click="toggleWeekSelector()" class="flex w-40 items-center justify-between bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                 <span x-text="selectedWeek() ? selectedWeek().weekLabel : 'Select Week'"></span>
                 <x-general.icon name="downChevron" class="w-5 h-5 text-slate-500" />
             </button>
             
-            <div x-show="showWeekSelector" 
+            <div x-show="showWeekSelector"
+                 x-ref="weekDropdown"
                  @click.away="showWeekSelector = false" 
                  class="absolute z-100 mt-1 w-full rounded-md bg-white shadow-lg border border-slate-300 h-96 overflow-y-auto">
                 
@@ -41,7 +42,10 @@
             </div>
         </div>
 
-        <button @click="navigateWeek(1)" title="Next Week" class="rounded-r-md border-l border-slate-300 p-2 text-slate-500 hover:bg-slate-100">
+        <button @click="navigateWeek(1)" title="Next Week" 
+            :disabled="!canNavigateNext()"
+            :class="{ 'opacity-50 cursor-not-allowed': !canNavigateNext() }" 
+            class="rounded-r-md border-l border-slate-300 p-2 text-slate-500 hover:bg-slate-100">
             <x-general.icon name="rightChevron" class="w-5 h-5 text-slate-500" />
         </button>
     </div>
@@ -71,7 +75,7 @@
      *   },
      *   {
      *     "payPeriodLabel": "Jun 22 - Jul 5",
-     *     "payPeriodStartDate": 2025-06-22,
+     *     "payPeriodStartDate": "2025-06-22",
      *     "payPeriodEndDate": "2025-07-05",
      *     "weeks": [
      *       // ... 2 weeks per pay period
@@ -121,6 +125,18 @@
                 // Fallback to the middle-most pay period if today is out of range
                 this.selectedPayPeriodIndex = Math.floor(this.payPeriodNavData.length / 2);
                 this.selectedWeekIndex = 0;
+            },
+
+            toggleWeekSelector() {
+                this.showWeekSelector = !this.showWeekSelector;
+                if (this.showWeekSelector) {
+                    this.$nextTick(() => {
+                        const selected = this.$refs.weekDropdown.querySelector('.bg-blue-100');
+                        if (selected) {
+                            selected.scrollIntoView({ block: 'center' });
+                        }
+                    });
+                }
             },
 
             selectedWeek() {
@@ -177,6 +193,17 @@
                 return true;
             },
 
+            canNavigatePrev() {
+                return this.selectedPayPeriodIndex > 0 || this.selectedWeekIndex > 0;
+            },
+
+            canNavigateNext() {
+                const lastPeriodIndex = this.payPeriodNavData.length - 1;
+                const lastWeekIndex = this.payPeriodNavData[lastPeriodIndex]?.weeks?.length - 1 ?? 0;
+                return this.selectedPayPeriodIndex < lastPeriodIndex || 
+                    this.selectedWeekIndex < lastWeekIndex;
+            },
+
             
             // 4) dispatchChangeEvent()
             dispatchChangeEvent() {
@@ -188,7 +215,8 @@
                 const weekNum = this.selectedWeekIndex === 0 ? 'Week 1' : 'Week 2';
                 const payPeriodStartDate = payPeriod.weeks[0].startDate;
                 const payPeriodEndDate = payPeriod.weeks[1].endDate;
-                
+
+                this.$store.timesheetPageRegistry.sequenceNum += 1
                 this.$dispatch('timesheet-date-change', {
                     startDate: week.startDate,
                     endDate: week.endDate,
@@ -196,6 +224,7 @@
                     payPeriodLabel: payPeriod.payPeriodLabel,
                     payPeriodStartDate: payPeriodStartDate,
                     payPeriodEndDate: payPeriodEndDate,
+                    sequenceNum: this.$store.timesheetPageRegistry.sequenceNum
                 });
             },
         }

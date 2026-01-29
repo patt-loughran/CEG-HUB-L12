@@ -33,14 +33,8 @@ return [
 
         'mongodb' => [
         	'driver'   => 'mongodb',
-        	'host'     => env('DB_HOST', '127.0.0.1'),
-        	'port'     => env('DB_PORT', 27017),
+        	'dsn' => env('DB_DSN'),
         	'database' => env('DB_DATABASE', 'homestead'),
-        	'username' => env('DB_USERNAME', ''),
-        	'password' => env('DB_PASSWORD', ''),
-        	'options'  => [
-            		// 'database' => 'admin' // Some drivers require the auth source
-        	],
     	],
 
         'sqlite' => [

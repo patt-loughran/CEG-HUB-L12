@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use App\Http\Responses\ApiResponse;
+use App\Http\Responses\ApiResult;
 use App\Models\Hour;
 use App\Models\GlobalDoc;
 use App\Models\User;
@@ -36,13 +38,13 @@ class TimesheetController extends Controller
 
             // Prepare data for the date navigator
             $dateNavigatorData = $this->formatPayPeriodsForNavigator($surroundingPayPeriods);
+            $sequenceNum = 1;
 
-            return view('time.timesheet', ['dateNavigatorData'  => $dateNavigatorData]);
+            return view('time.timesheet', ['dateNavigatorData'  => $dateNavigatorData, 'sequenceNum' => $sequenceNum]);
 
         } catch (\Exception $e) {
-            Log::error('PayrollController error in index(): ' . $e->getMessage(), [
-                'trace' => $e->getTraceAsString(),
-                'request' => $request->all()
+            Log::error('TimesheetController error in index(): ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
             ]);
 
             return response()->view('errors.500', ['error_message' => $e->getMessage()], 500);
@@ -80,7 +82,7 @@ class TimesheetController extends Controller
         $surroundingPeriods = array_merge($periodsPrevYear, $periodsCurrentYear, $periodsNextYear);
 
         if (empty($surroundingPeriods)) {
-            throw new Exception("no relevant pay-periods found");
+            throw new \Exception("no relevant pay-periods found");
         }
 
         $currentIndex = -1;
@@ -98,7 +100,7 @@ class TimesheetController extends Controller
 
         // If '$today' doesn't fall within any pay period in the three-year span
         if ($currentIndex === -1) {
-            throw new Exception('todays date not found in available pay-periods');
+            throw new \Exception('todays date not found in available pay-periods');
         }
 
         // Calculate the starting index for our slice. We want 6 periods before the current one.
@@ -153,8 +155,8 @@ class TimesheetController extends Controller
                 'weekNum'            => 'required|string',
                 'payPeriodLabel'     => 'required|string',
                 'payPeriodStartDate' => 'required|date_format:Y-m-d',
-                'payPeriodEndDate'   => 'required|date_format:Y-m-d'
-
+                'payPeriodEndDate'   => 'required|date_format:Y-m-d',
+                'sequenceNum'        => 'required|integer'
             ]);
 
             $user = Auth::user();
@@ -174,6 +176,7 @@ class TimesheetController extends Controller
             $data = [ 
                 'timesheetData' => ApiResponse::error("Validation Failed" . $e->getMessage()),
                 'statsData'     => ApiResponse::error("Validation Failed" . $e->getMessage()),
+                'sequenceNum'   => $validatedData['sequenceNum']
             ];
             return response()->json($data, 200); 
         }
@@ -249,7 +252,8 @@ class TimesheetController extends Controller
             'timesheetData'         => $timesheetData, 
             'prevPayPeriodStatus'   => $prevPayPeriodStatus,
             'daysLeftInPayPeriod'   => $daysLeftInPayPeriod,
-            'currentPayPeriodHours' => $currentPayPeriodHours
+            'currentPayPeriodHours' => $currentPayPeriodHours,
+            'sequenceNum'   => $validatedData['sequenceNum']
         ];
 
         return response()->json($response, 200); 
@@ -375,7 +379,6 @@ class TimesheetController extends Controller
         }
 
         $timesheetRows = [];
-        $dailyTotals = array_fill(0, 7, 0);
 
         foreach ($hourEntries as $entry) {
             $hours = [];
@@ -392,7 +395,6 @@ class TimesheetController extends Controller
                 if ($dayIndex !== null) {
                     $hoursValue = (float) $daily['hours'];
                     $hours[$dayIndex]['value'] = $hoursValue;
-                    $dailyTotals[$dayIndex] += $hoursValue;
                     $rowTotal += $hoursValue;
                 }
             }
@@ -648,7 +650,123 @@ class TimesheetController extends Controller
      * @param  \Illuminate\Http\Request  $request
      * @return \Illuminate\Http\JsonResponse
      */
-    public function saveTimesheet(Request $request) {
+        public function saveTimesheet(Request $request) {
+        // Stage 1: Validation
+        try {
+            $validatedData = $request->validate([
+                'headerInfo.currentStartDate'  => 'required|date_format:Y-m-d',
+                'timesheetRows'                => 'present|array',
+                'timesheetRows.*.project_code' => 'required|string',
+                'timesheetRows.*.sub_project'  => 'present|string|nullable',
+                'timesheetRows.*.activity_code'=> 'present|string|nullable',
+                'timesheetRows.*.is_pinned'    => 'required|boolean',
+                'timesheetRows.*.hours'        => 'required|array|min:7|max:7',
+                'timesheetRows.*.hours.*.value'=> 'required|numeric|min:0|max:24',
+            ]);
 
+            $user = Auth::user();
+            $user = User::where('email', 'ploughran@ceg-engineers.com')->first(); // TODO: remove dev override
+            
+            $startDate = Carbon::parse($validatedData['headerInfo']['currentStartDate'])->startOfDay();
+            $endDate = $startDate->copy()->addDays(6)->endOfDay();
+
+            $rows = $validatedData['timesheetRows'];
+
+        } catch (\Exception $e) {
+             Log::error('Validation failed in saveTimesheet: ' . $e->getMessage(), [
+                'requestData' => $request->all(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return response()->json(ApiResult::error("Validation Failed: " . $e->getMessage()), 200);
+        }
+
+        // Stage 2: Processing (Prepare data for Bulk Insert)
+        try {
+            $newHourDocuments = [];
+            $newPinnedProjects = [];
+            $seenPins = []; 
+            $now = new \MongoDB\BSON\UTCDateTime(now());
+
+            foreach ($rows as $row) {
+                // 1. Prepare Pinned Projects
+                if ($row['is_pinned']) {
+                    // Create composite key to ensure uniqueness in the pinned list
+                    $pinKey = $row['project_code'] . '|' . ($row['sub_project'] ?? '') . '|' . ($row['activity_code'] ?? '');
+                    
+                    if (!in_array($pinKey, $seenPins)) {
+                        $seenPins[] = $pinKey;
+                        $newPinnedProjects[] = [
+                            'user_email'    => $user->email,
+                            'project_code'  => $row['project_code'],
+                            'sub_project'   => $row['sub_project'],
+                            'activity_code' => $row['activity_code'],
+                            'updated_at'    => $now,
+                            'created_at'    => $now,
+                        ];
+                    }
+                }
+
+                // 2. Prepare Hour Entries (Skip rows with no project code)
+                if (empty($row['project_code'])) continue;
+
+                foreach ($row['hours'] as $index => $dayHour) {
+                    $hoursValue = (float) $dayHour['value'];
+                    
+                    // Only save non-zero entries
+                    if ($hoursValue > 0) {
+                        $entryDate = $startDate->copy()->addDays($index);
+                        
+                        $newHourDocuments[] = [
+                            'user_email'    => $user->email,
+                            'project_code'  => $row['project_code'],
+                            'sub_project'   => $row['sub_project'] ?? '',
+                            'activity_code' => $row['activity_code'] ?? '',
+                            // Manual BSON conversion required for raw insert arrays
+                            'date'          => new \MongoDB\BSON\UTCDateTime($entryDate->getTimestamp() * 1000),
+                            'hours'         => $hoursValue,
+                            'updated_at'    => $now,
+                            'created_at'    => $now,
+                        ];
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            Log::error('Data Preparation failed in saveTimesheet: ' . $e->getMessage());
+            return response()->json(ApiResult::error("Error preparing data for save."), 200);
+        }
+
+        // Stage 3: Transaction execution
+        try {
+            // Using DB facade to start transaction, but Eloquent for queries where possible
+            DB::connection('mongodb')->transaction(function () use ($user, $startDate, $endDate, $newHourDocuments, $newPinnedProjects) {
+                
+                // 1. Delete existing Hours for this User within this Date Range
+                // We use Eloquent here so it handles the Date -> BSON conversion for the query automatically
+                Hour::where('user_email', $user->email)
+                    ->where('date', '>=', $startDate)
+                    ->where('date', '<=', $endDate)
+                    ->delete();
+
+                // 2. Delete ALL existing Pinned Projects for this user.
+                PinnedProject::where('user_email', $user->email)->delete();
+
+                // 3. Bulk Insert New Hours
+                if (!empty($newHourDocuments)) {
+                    Hour::insert($newHourDocuments);
+                }
+
+                // 4. Bulk Insert New Pinned Projects
+                if (!empty($newPinnedProjects)) {
+                    PinnedProject::insert($newPinnedProjects);
+                }
+            }); 
+            return response()->json(ApiResult::success(), 200);
+
+        } catch (\Exception $e) {
+            Log::error('Transaction failed in saveTimesheet: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json(ApiResult::error("Database Transaction Failed: " . $e->getMessage()), 200);
+        }
     }
 }

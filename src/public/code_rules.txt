@@ -57,6 +57,7 @@ General:
 
                     general display component rules:
                         - Display Components MUST have a visual state for each of these three conditions: a loading state (e.g., skeleton), a data-display state, and an error state.
+                        - In some cases, the Error state for a component can be a separate modal div.
                         - The init() method of a display component SHOULD set isLoading to true to handle the initial page load, ensuring a loading skeleton is shown while the very first fetch is in progress.
 
                     static display component rules:

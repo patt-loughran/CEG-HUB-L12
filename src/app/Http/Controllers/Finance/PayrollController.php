@@ -23,8 +23,7 @@ class PayrollController extends Controller
         }
         catch (\Exception $e) {
             Log::error('PayrollController error in index(): ' . $e->getMessage(), [
-                'trace' => $e->getTraceAsString(),
-                'request' => $request->all()
+                'trace' => $e->getTraceAsString()
             ]);
 
             return response()->view('errors.500', ['error_message' => $e->getMessage()], 500);
@@ -100,13 +99,13 @@ class PayrollController extends Controller
             $validatedData = $request->validate([
                 'year' => 'required|string',
                 'dateRangeDropdown' => 'required|string',
-                'activeFilters' => 'present|array'
+                'activeFilter' => 'nullable|string'
             ]);
 
             $year = $validatedData['year'];
             $startDate = null;
             $endDate = null;
-            $activeFilters = $validatedData['activeFilters'];
+            $activeFilter = $validatedData['activeFilter'];
 
             // Use regex to extract the MM/DD parts from a string like "PP 05 (03/16 - 03/29)"
             preg_match('/\((\d{2}\/\d{2}) - (\d{2}\/\d{2})\)/', $validatedData['dateRangeDropdown'], $matches);
@@ -166,14 +165,9 @@ class PayrollController extends Controller
                 ]
             ];
 
-            // Handle wage types (Hourly AND/OR Salaried)
-            $selectedWageTypes = [];
-            if (in_array('hourly', $activeFilters)) $selectedWageTypes[] = 'hourly';
-            if (in_array('salaried', $activeFilters)) $selectedWageTypes[] = 'salaried';
-
-            // If wage types are selected, use the $in operator to match ANY of them
-            if (!empty($selectedWageTypes)) {
-                $userMatchFilter['wage_type'] = ['$in' => $selectedWageTypes];
+            // Handle wage types (Hourly or Salaried or None)
+            if ($activeFilter) {
+                $userMatchFilter['wage_type'] = $activeFilter;
             }
 
             $pipeline = [
