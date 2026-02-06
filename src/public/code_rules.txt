@@ -32,6 +32,7 @@ General:
                 - Modifying these inputs and/or hitting a "submit" button will result in a custom event being dispatched to the data bridge, indicating we need to fetch new data for a specific "Synchronous Group" or an independent display component (Synchronous Group of size 1).
                 - Synchronous Group: A collection of display components that logically update together based on the same user input filters.
                 - There are two main layouts for a User Input component. Either custom events are triggered on change of the input elements and are sent as soon as a change is made, or there is a "submit" button that sends the state of the neccessary input elements.
+                - Data that the user input component needs to fill out its inputs will be recived from the index() method in the relevant controller upon initial load. 
                 - Usually there is just one User Input Component, but there can be mutliple depending on the page. One User Input Component can be responsible for multiple Synchronous Groups. 
                 - A User Input component will send out one singular event for each unique synchronous group.
                 - Sometimes, a User Input Component will be a child of a display component. When this is the case we will still define the user input component in its own file and will use a slot for the user input component within the display component.

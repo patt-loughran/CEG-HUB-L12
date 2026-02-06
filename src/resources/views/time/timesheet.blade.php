@@ -48,15 +48,15 @@
 
     {{-- BOTTOM ROW: Main Timesheet Entry Component --}}
     <div class="flex-grow min-h-0">
-        <x-time.timesheet-entry>
+        <x-time.timesheet.timesheet-entry>
             <x-slot name="slot">
-                <x-time.date-navigator :date-navigator-data="$dateNavigatorData" />
+                <x-time.timesheet.date-navigator :date-navigator-data="$dateNavigatorData" />
             </x-slot>
         </x-time.timesheet-entry>
     </div>
 
     {{-- This component is headless and handles all data fetching for the page (No changes here) --}}
-    <x-time.data-bridge />
+    <x-time.timesheet.data-bridge />
 
     {{-- Add the error modal component here --}}
     <x-general.error-modal />
