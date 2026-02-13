@@ -20,18 +20,18 @@
     class="bg-white rounded-lg shadow-sm border border-slate-200 flex flex-col flex-1 min-h-[320px] max-w-full relative overflow-hidden">
       
     {{-- Component Header --}}
-    <header class="p-4 border-b border-slate-200 flex-shrink-0">
+    <header class="bg-slate-700 p-4 border-b border-slate-200 flex-shrink-0">
         <div class="flex items-center justify-between">
             <div>
-                <h2 class="font-bold text-slate-800 text-lg">Employee Hours Summary</h2>
-                <p class="text-sm text-slate-500 -mt-0.5 min-h-[1.25rem]">
+                <h2 class="font-bold text-white text-lg">Employee Hours Summary</h2>
+                <p class="text-sm text-slate-100 -mt-0.5 min-h-[1.25rem]">
                     <span x-show="!isLoading && !error && payPeriodIdentifier" x-text="`Data for ${payPeriodIdentifier}`"></span>
                     <span x-show="isLoading">Fetching the latest data...</span>
                     <span x-show="!isLoading && error">Data could not be loaded</span>
                 </p>
             </div>
             <template x-if="!isLoading && !error && tableData.length > 0">
-                <button x-on:click="openExportModal()" class="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-200 text-slate-800 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-700 hover:text-white hover:border-slate-300 hover:cursor-pointer transition-all">
+                <button x-on:click="openExportModal()" class="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-200 text-slate-800 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-300 hover:text-black hover:cursor-pointer transition-all">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
                     Export
                 </button>

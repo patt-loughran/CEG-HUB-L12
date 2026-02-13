@@ -3,7 +3,7 @@
      x-on:open-export-modal.window="showModal = true; fileName = $event.detail?.defaultName || ''"
      x-show="showModal"
      x-cloak
-     class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
+     class="fixed inset-0 z-50000 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
      x-transition:enter="ease-out duration-300"
      x-transition:enter-start="opacity-0"
      x-transition:enter-end="opacity-100"
