@@ -1,1 +1,0 @@
-{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"}],"uuid":"44d2bb6600f54f7bbcbd09ae79dd4fc8","collectionName":"user_timehub_configurations","type":"collection"}

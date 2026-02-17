@@ -1,1 +1,0 @@
-{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"user_email":{"$numberInt":"1"},"project_code":{"$numberInt":"1"},"sub_project":{"$numberInt":"1"},"activity_code":{"$numberInt":"1"}},"name":"full"}],"uuid":"2da3f08b286c4923b8484f53946afa3d","collectionName":"pinned_projects","type":"collection"}

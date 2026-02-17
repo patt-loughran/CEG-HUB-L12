@@ -1,0 +1,15 @@
+# MongoDB data
+prod_data/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE/editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment files
+.env
