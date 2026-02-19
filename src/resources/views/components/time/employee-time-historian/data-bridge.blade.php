@@ -1,29 +1,45 @@
 {{--
-    Data-Bridge: Headless component for the Employee Time page.
+    Data-Bridge: Headless component for the Employee Time Historian page.
     
+    Listens for 'employee-time-change' from the User Input Component.
+    
+    Expected payload from User Input:
+    {
+        granularity: 'day' | 'pay_period' | 'month' | 'quarter' | 'year',
+        scope: ['Project', 'Sub-Code', 'Activity'],  // subset
+        start_date: <varies by granularity>,
+        end_date:   <varies by granularity>
+    }
+
+    Expected response from Controller (getData):
+    {
+        historianTable: { data: {...}, errors: null } | { data: null, errors: "..." }
+    }
+
     Responsibilities:
     1. Listen for 'employee-time-change' from the User Input Component.
     2. Immediately dispatch 'employee-time-data-loading' so display components show skeletons.
-    3. POST to the controller's getData() endpoint.
+    3. POST to the Historian controller's getData() endpoint.
     4. On HTTP 200: dispatch 'employee-time-data-updated' with the full response payload.
     5. On network/server failure: dispatch 'employee-time-fetch-error' with an error message.
 --}}
 
 <div 
-    x-data="employeeTimeDataBridge()"
-    @employee-time-change.window="handleChange($event.detail)"
+    x-data="timeEmployeeTimeHistorianDataBridgeLogic()"
+    @employee-time-change.window="fetchData($event)"
     class="hidden"
     aria-hidden="true"
 ></div>
 
+@push('scripts')
 <script>
-    function employeeTimeDataBridge() {
+    function timeEmployeeTimeHistorianDataBridgeLogic() {
         return {
             // In-flight AbortController so we can cancel stale requests
             _abortController: null,
 
             /**
-             * Maps from the frontend scope labels to the controller's expected keys.
+             * Maps frontend scope labels to the controller's expected keys.
              */
             SCOPE_MAP: {
                 'Project':   'project_code',
@@ -44,22 +60,18 @@
             },
 
             /**
-             * Fired when the User Input Component dispatches 'employee-time-change'.
-             * 
-             * Expected payload shape from User Input:
-             * {
-             *   granularity: 'day' | 'pay_period' | 'month' | 'quarter' | 'year',
-             *   scope: ['Project', 'Sub-Code', 'Activity'],  // subset
-             *   start_date: <varies by granularity>,
-             *   end_date:   <varies by granularity>
-             * }
+             * @param {CustomEvent} event The event dispatched from the User Input Component.
              */
-            async handleChange(payload) {
-                // --- 1. Map frontend values to backend-expected values ---
+            async fetchData(event) {
+                // --- 1. Dispatch loading event SYNCHRONOUSLY before the fetch ---
+                this.$dispatch('employee-time-data-loading');
+
+                // --- 2. Map frontend values to backend-expected values ---
+                const payload = event.detail;
                 const granularity = this.GRANULARITY_MAP[payload.granularity] || payload.granularity;
 
                 const scopes = (payload.scope || []).map(s => this.SCOPE_MAP[s]).filter(Boolean);
-                if (scopes.length === 0) return; // Safety: nothing to query without scopes
+                if (scopes.length === 0) return;
 
                 const requestBody = {
                     granularity: granularity,
@@ -67,9 +79,6 @@
                     start: payload.start_date,
                     end: payload.end_date,
                 };
-
-                // --- 2. Dispatch loading event SYNCHRONOUSLY before the fetch ---
-                window.dispatchEvent(new CustomEvent('employee-time-data-loading'));
 
                 // --- 3. Cancel any in-flight request ---
                 if (this._abortController) {
@@ -79,7 +88,7 @@
 
                 // --- 4. Fetch data from the controller ---
                 try {
-                    const response = await fetch("{{ route('time.employee-time.getData') }}", {
+                    const response = await fetch("{{ route('time.employee-time-historian.getData') }}", {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -93,7 +102,7 @@
                     if (!response.ok) {
                         throw new Error(`Server returned ${response.status}: ${response.statusText}`);
                     }
-            
+
                     const data = await response.json();
 
                     // --- 5a. Dispatch data-updated with the full associative payload ---
@@ -105,7 +114,7 @@
                     // Ignore aborted requests (user triggered a new one)
                     if (error.name === 'AbortError') return;
 
-                    console.error('Employee Time fetch error:', error);
+                    console.error('Employee Time Historian fetch error:', error);
 
                     // --- 5b. Dispatch fetch-error for network/server failures ---
                     window.dispatchEvent(new CustomEvent('employee-time-fetch-error', {
@@ -116,3 +125,4 @@
         };
     }
 </script>
+@endpush

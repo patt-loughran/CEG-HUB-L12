@@ -17,8 +17,23 @@ Route::post('/time/timesheet/data',   [App\Http\Controllers\Time\TimesheetContro
 Route::post('/time/timesheet/recent', [App\Http\Controllers\Time\TimesheetController::class, 'getRecentRows']);
 Route::post('/time/timesheet/save',   [App\Http\Controllers\Time\TimesheetController::class, 'saveTimesheet']);
 
-Route::get('/time/employee-time',       [App\Http\Controllers\Time\EmployeeTimeController::class, 'index'])->name('time.employee-time');
-Route::post('/time/employee-time/data', [App\Http\Controllers\Time\EmployeeTimeController::class,  'getData'])->name('time.employee-time.getData');
+// ================================================================
+//  Employee Time — Historian
+// ================================================================
+Route::get('/time/employee-time/historian', [App\Http\Controllers\Time\EmployeeTimeHistorianController::class, 'index'])
+    ->name('time.employee-time-historian.index');
+
+Route::post('/time/employee-time/historian/get-data', [App\Http\Controllers\Time\EmployeeTimeHistorianController::class, 'getData'])
+    ->name('time.employee-time-historian.getData');
+
+// ================================================================
+//  Employee Time — Aggregated
+// ================================================================
+Route::get('/time/employee-time/summary', [App\Http\Controllers\Time\EmployeeTimeSummaryController::class, 'index'])
+    ->name('time.employee-time-summary.index');
+
+Route::post('/time/employee-time/summary/get-data', [App\Http\Controllers\Time\EmployeeTimeSummaryController::class, 'getData'])
+    ->name('time.employee-time-summary.getData');
 
 Route::get('/ping', function () {
     return 'pong';

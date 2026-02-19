@@ -3,22 +3,19 @@
 namespace App\Http\Controllers\Time;
 
 use App\Http\Controllers\Controller;
+use App\Models\GlobalDoc; // Added from Trait
+use App\Models\Project;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use App\Http\Responses\ApiResponse;
-use App\Models\Hour;
-use App\Models\GlobalDoc;
-use App\Models\User;
-use App\Models\Project;
-use App\Models\SubProject;
 use Carbon\Carbon;
 
-class EmployeeTimeController extends Controller
+class EmployeeTimeHistorianController extends Controller
 {
     // ================================================================
-    //  SCOPE FIELD MAPPING
+    //  SCOPE FIELD MAPPING (Formerly in Trait)
     // ================================================================
 
     /**
@@ -81,54 +78,66 @@ class EmployeeTimeController extends Controller
     // ================================================================
 
     /**
-     * Display the timesheet page with initial data.
+     * Display the Historian timesheet page with initial data.
      *
      * @return \Illuminate\View\View
      */
     public function index()
     {
         try {
-            $doc = GlobalDoc::where('name', 'Pay-Periods')->first();
-            $payPeriods = $doc->{'Pay-Periods'};
+            $indexData = $this->getPayPeriodIndexData();
 
-            $payPeriodsFormatted = [];
-            $earliestStart = null;
-            $latestEnd = null;
-
-            foreach ($payPeriods as $year => $periods) {
-                $cleanedPeriods = [];
-                foreach ($periods as $period) {
-                    $start = $period['start_date'];
-                    $end = $period['end_date'];
-
-                    if ($earliestStart === null || $start->lt($earliestStart)) {
-                        $earliestStart = $start;
-                    }
-                    if ($latestEnd === null || $end->gt($latestEnd)) {
-                        $latestEnd = $end;
-                    }
-
-                    $cleanedPeriods[] = [
-                        'start_date' => $start->format('m/d/y H:i:s'),
-                        'end_date'   => $end->format('m/d/y H:i:s'),
-                    ];
-                }
-                $payPeriodsFormatted[$year] = $cleanedPeriods;
-            }
-
-            $startDateCutOff = $earliestStart ? $earliestStart->format('m/d/y H:i:s') : null;
-            $endDateCutOff = $latestEnd ? $latestEnd->format('m/d/y H:i:s') : null;
-
-            return view('time.employee-time', [
-                'payPeriodData'   => $payPeriodsFormatted,
-                'startDateCutOff' => $startDateCutOff,
-                'endDateCutOff'   => $endDateCutOff,
-            ]);
+            return view('time.employee-time-historian', $indexData);
 
         } catch (\Exception $e) {
-            Log::error('EmployeeTimeController error: ' . $e->getMessage());
+            Log::error('EmployeeTimeHistorianController index error: ' . $e->getMessage());
             return response()->view('errors.500', ['error_message' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Fetch and format pay period data for the initial page load.
+     *
+     * @return array{payPeriodData: array, startDateCutOff: string|null, endDateCutOff: string|null}
+     */
+    private function getPayPeriodIndexData(): array
+    {
+        $doc = GlobalDoc::where('name', 'Pay-Periods')->first();
+        $payPeriods = $doc->{'Pay-Periods'};
+
+        $payPeriodsFormatted = [];
+        $earliestStart = null;
+        $latestEnd = null;
+
+        foreach ($payPeriods as $year => $periods) {
+            $cleanedPeriods = [];
+            foreach ($periods as $period) {
+                $start = $period['start_date'];
+                $end = $period['end_date'];
+
+                if ($earliestStart === null || $start->lt($earliestStart)) {
+                    $earliestStart = $start;
+                }
+                if ($latestEnd === null || $end->gt($latestEnd)) {
+                    $latestEnd = $end;
+                }
+
+                $cleanedPeriods[] = [
+                    'start_date' => $start->format('m/d/y H:i:s'),
+                    'end_date'   => $end->format('m/d/y H:i:s'),
+                ];
+            }
+            $payPeriodsFormatted[$year] = $cleanedPeriods;
+        }
+
+        $startDateCutOff = $earliestStart ? $earliestStart->format('m/d/y H:i:s') : null;
+        $endDateCutOff = $latestEnd ? $latestEnd->format('m/d/y H:i:s') : null;
+
+        return [
+            'payPeriodData'   => $payPeriodsFormatted,
+            'startDateCutOff' => $startDateCutOff,
+            'endDateCutOff'   => $endDateCutOff,
+        ];
     }
 
     // ================================================================
@@ -136,12 +145,12 @@ class EmployeeTimeController extends Controller
     // ================================================================
 
     /**
-     * Fetch data for both the Historian and Aggregated display components.
+     * Fetch data for the Historian display component.
      * Called via POST from the data-bridge.
      */
     public function getData(Request $request)
     {
-        $componentKeys = ['historianTable', 'aggregatedTable'];
+        $componentKeys = ['historianTable'];
 
         // ----------------------------------------------------------
         //  STAGE 1: Global Validation & Parsing
@@ -149,7 +158,7 @@ class EmployeeTimeController extends Controller
         try {
             $parsed = $this->parseRequest($request);
         } catch (\Exception $e) {
-            Log::error('EmployeeTime getData validation error: ' . $e->getMessage(), [
+            Log::error('EmployeeTimeHistorian getData validation error: ' . $e->getMessage(), [
                 'inputs' => $request->all(),
                 'trace'  => $e->getTraceAsString(),
             ]);
@@ -162,10 +171,8 @@ class EmployeeTimeController extends Controller
         }
 
         // ----------------------------------------------------------
-        //  STAGE 2: Shared Data Gathering (Two Pipelines)
+        //  STAGE 2: Shared Data Gathering
         // ----------------------------------------------------------
-
-        // --- Pipeline A: Historian ---
         $historianShared = null;
         try {
             $historianShared = $this->runHistorianPipeline(
@@ -176,40 +183,17 @@ class EmployeeTimeController extends Controller
                 $parsed['scopes'],
                 $parsed['periods'],
             );
-
         } catch (\Exception $e) {
-            Log::error('EmployeeTime Historian pipeline error: ' . $e->getMessage(), [
+            Log::error('EmployeeTimeHistorian pipeline error: ' . $e->getMessage(), [
                 'inputs' => $request->all(),
                 'trace'  => $e->getTraceAsString(),
             ]);
             $historianShared = ApiResponse::error('Failed to query historian data.');
         }
 
-        // --- Pipeline B: Aggregated ---
-        $aggregatedShared = null;
-        try {
-            $aggregatedShared = $this->runAggregatedPipeline(
-                $parsed['userEmail'],
-                $parsed['queryStart'],
-                $parsed['queryEnd'],
-                $parsed['granularity'],
-                $parsed['periods'],
-                $parsed['nonBillableCodes'],
-                $parsed['wageType'],
-            );
-        } catch (\Exception $e) {
-            Log::error('EmployeeTime Aggregated pipeline error: ' . $e->getMessage(), [
-                'inputs' => $request->all(),
-                'trace'  => $e->getTraceAsString(),
-            ]);
-            $aggregatedShared = ApiResponse::error('Failed to query aggregated data.');
-        }
-
         // ----------------------------------------------------------
         //  STAGE 3: Individual Component Processing
         // ----------------------------------------------------------
-
-        // --- Historian Table ---
         $historianResult = $this->buildHistorianComponent(
             $historianShared,
             $parsed['scopes'],
@@ -217,19 +201,9 @@ class EmployeeTimeController extends Controller
             $parsed['periodHeaders'],
             $parsed['headerMode'],
         );
-        Log::debug($historianResult);
-        // --- Aggregated Table ---
-        $aggregatedResult = $this->buildAggregatedComponent(
-            $aggregatedShared,
-            $parsed['periods'],
-            $parsed['periodHeaders'],
-            $parsed['granularity'],
-        );
 
         return response()->json([
-            'historianTable'  => $historianResult,
-            'aggregatedTable' => $aggregatedResult,
-            'granularity'     => $parsed['granularity']
+            'historianTable' => $historianResult,
         ], 200);
     }
 
@@ -238,20 +212,16 @@ class EmployeeTimeController extends Controller
     // ================================================================
 
     /**
-     * Parse and validate the incoming request. Returns all data needed
-     * by later stages.
+     * Parse and validate the incoming request for the Historian page.
+     * Extends the common parsing with scope validation.
      *
      * @throws \Exception on validation failure
      */
     private function parseRequest(Request $request): array
     {
-        $granularity = $request->input('granularity');
-        $validGranularities = ['day', 'pay-period', 'month', 'quarter', 'year'];
-        if (!in_array($granularity, $validGranularities, true)) {
-            throw new \Exception("Invalid granularity: {$granularity}");
-        }
+        $common = $this->parseCommonRequest($request);
 
-        // --- Parse Scopes ---
+        // --- Parse Scopes (Historian-specific) ---
         $rawScopes = $request->input('scopes', []);
         $scopes = [];
         foreach ($rawScopes as $scope) {
@@ -262,6 +232,24 @@ class EmployeeTimeController extends Controller
         }
         if (empty($scopes)) {
             throw new \Exception('At least one scope must be selected.');
+        }
+
+        return array_merge($common, [
+            'scopes' => $scopes,
+        ]);
+    }
+
+    /**
+     * Parse and validate the common parts of an incoming getData request.
+     *
+     * @throws \Exception on validation failure
+     */
+    private function parseCommonRequest(Request $request): array
+    {
+        $granularity = $request->input('granularity');
+        $validGranularities = ['day', 'pay-period', 'month', 'quarter', 'year'];
+        if (!in_array($granularity, $validGranularities, true)) {
+            throw new \Exception("Invalid granularity: {$granularity}");
         }
 
         // --- Parse Date Range ---
@@ -295,63 +283,46 @@ class EmployeeTimeController extends Controller
 
         // --- Generate Smart Column Headers ---
         $periodHeaders = $this->generatePeriodHeaders($granularity, $periods, $queryStart, $queryEnd);
-        // Determine the Header Mode instead of a boolean
-        $headerMode = 'standard';
 
+        // --- Determine Header Mode ---
+        $headerMode = 'standard';
         if ($granularity === 'pay-period') {
-            // Long labels (e.g., "01-01-23 - 01-15-23") require more height
-            $headerMode = 'compact-tall'; 
+            $headerMode = 'compact-tall';
         } elseif ($granularity === 'day' && $queryStart->year !== $queryEnd->year) {
-            // Short labels (e.g., "01-01-23") require less height, but still need rotation
             $headerMode = 'compact-short';
         }
-        Log::debug($headerMode);
 
         // --- Resolve User ---
         //$userEmail = Auth::user()->email;
         $userEmail = "speichel@ceg-engineers.com";
 
-        // --- Fetch Non-Billable Project Codes ---
-        $nonBillableCodes = Project::where('is_internal', true)
-            ->pluck('projectcode')
-            ->toArray();
-        
-        Log::debug($nonBillableCodes);
-
-        // --- Fetch User Wage Type (for overtime in aggregated table) ---
-        //$wageType = Auth::user()->wage_type ?? 'salary'; TODO update
-        $wageType = "salaried";
-
         return [
-            'granularity'      => $granularity,
-            'queryStart'       => $queryStart,
-            'queryEnd'         => $queryEnd,
-            'scopes'           => $scopes,
-            'periods'          => $periods,
-            'periodHeaders'    => $periodHeaders,
-            'headerMode'       => $headerMode,
-            'payPeriods'       => $payPeriods,
-            'userEmail'        => $userEmail,
-            'nonBillableCodes' => $nonBillableCodes,
-            'wageType'         => $wageType,
+            'granularity'   => $granularity,
+            'queryStart'    => $queryStart,
+            'queryEnd'      => $queryEnd,
+            'periods'       => $periods,
+            'periodHeaders' => $periodHeaders,
+            'headerMode'    => $headerMode,
+            'payPeriods'    => $payPeriods,
+            'userEmail'     => $userEmail,
         ];
     }
 
     /**
-    * Fetch pay periods from the globals collection that overlap with
-    * the given date range. Returns an array sorted by start date.
-    */
+     * Fetch pay periods from the globals collection that overlap with
+     * the given date range. Returns an array sorted by start date.
+     */
     private function getRelevantPayPeriods(Carbon $queryStart, Carbon $queryEnd): array
     {
         $doc = GlobalDoc::where('name', 'Pay-Periods')->first();
         $allPayPeriods = $doc->{'Pay-Periods'};
 
         $relevant = [];
-        $seen = []; // Array to track unique periods
+        $seen = [];
 
         foreach ($allPayPeriods as $year => $periods) {
             foreach ($periods as $period) {
-                $ppStart = $period['start_date']; 
+                $ppStart = $period['start_date'];
                 $ppEnd = $period['end_date'];
 
                 // Create a unique key for this specific period
@@ -367,7 +338,6 @@ class EmployeeTimeController extends Controller
                         'start' => $ppStart->copy(),
                         'end'   => $ppEnd->copy(),
                     ];
-                    // Mark as seen
                     $seen[$uniqueKey] = true;
                 }
             }
@@ -377,10 +347,6 @@ class EmployeeTimeController extends Controller
 
         return $relevant;
     }
-
-    // ================================================================
-    //  GET DATA HELPERS — Period Generation & Headers
-    // ================================================================
 
     /**
      * Generate an ordered array of period definitions based on granularity.
@@ -526,7 +492,7 @@ class EmployeeTimeController extends Controller
     }
 
     // ================================================================
-    //  GET DATA HELPERS — Pipeline Builders
+    //  GET DATA HELPERS — Pipeline Builder
     // ================================================================
 
     /**
@@ -619,7 +585,7 @@ class EmployeeTimeController extends Controller
             ],
         ];
 
-        // --- Sort by scope fields ---
+        // --- Sort by scope fields (priority codes first, then alphabetical) ---
         $pipeline[] = [
             '$addFields' => [
                 '_sort_priority' => [
@@ -643,182 +609,6 @@ class EmployeeTimeController extends Controller
         $pipeline[] = [
             '$project' => ['_sort_priority' => 0],
         ];
-
-        // --- Execute ---
-        $collection = DB::connection('mongodb')->getCollection('hours');
-        $cursor = $collection->aggregate($pipeline);
-
-        return iterator_to_array($cursor);
-    }
-
-    /**
-     * Build and run the Aggregated table aggregation pipeline.
-     * Returns the raw pipeline result as an array.
-     */
-    private function runAggregatedPipeline(
-        string $userEmail,
-        Carbon $queryStart,
-        Carbon $queryEnd,
-        string $granularity,
-        array $periods,
-        array $nonBillableCodes,
-        string $wageType,
-    ): array {
-        $pipeline = [];
-
-        // --- Match Stage ---
-        $pipeline[] = [
-            '$match' => [
-                'user_email' => $userEmail,
-                'date' => [
-                    '$gte' => new \MongoDB\BSON\UTCDateTime($queryStart->getTimestamp() * 1000),
-                    '$lte' => new \MongoDB\BSON\UTCDateTime($queryEnd->getTimestamp() * 1000),
-                ],
-            ],
-        ];
-
-        // --- Period Key Assignment ---
-        if ($granularity === 'pay-period') {
-            $ppStages = $this->getPayPeriodKeyStages($periods);
-            $pipeline = array_merge($pipeline, $ppStages);
-        } else {
-            $pipeline[] = [
-                '$addFields' => [
-                    'period_key' => $this->getPeriodKeyExpression($granularity),
-                ],
-            ];
-        }
-
-        // --- Group by period, compute category sums ---
-        $groupStage = [
-            '_id' => '$period_key',
-
-            'pto' => [
-                '$sum' => [
-                    '$cond' => [
-                        'if' => [
-                            '$and' => [
-                                ['$eq' => ['$project_code', 'CEG']],
-                                ['$eq' => ['$sub_project', 'PTO']],
-                            ],
-                        ],
-                        'then' => '$hours',
-                        'else' => 0,
-                    ],
-                ],
-            ],
-
-            'holiday' => [
-                '$sum' => [
-                    '$cond' => [
-                        'if' => [
-                            '$and' => [
-                                ['$eq' => ['$project_code', 'CEG']],
-                                ['$eq' => ['$sub_project', 'Holiday']],
-                            ],
-                        ],
-                        'then' => '$hours',
-                        'else' => 0,
-                    ],
-                ],
-            ],
-
-            'other_200' => [
-                '$sum' => [
-                    '$cond' => [
-                        'if' => [
-                            '$and' => [
-                                ['$eq' => ['$project_code', 'CEG']],
-                                ['$in' => ['$sub_project', self::OTHER_200_SUB_PROJECTS]],
-                            ],
-                        ],
-                        'then' => '$hours',
-                        'else' => 0,
-                    ],
-                ],
-            ],
-
-            'other_nb' => [
-                '$sum' => [
-                    '$cond' => [
-                        'if' => [
-                            '$and' => [
-                                ['$in' => ['$project_code', $nonBillableCodes]],
-                                ['$or' => [
-                                    ['$ne' => ['$project_code', 'CEG']],
-                                    ['$and' => [
-                                        ['$eq' => ['$project_code', 'CEG']],
-                                        ['$not' => ['$in' => ['$sub_project', self::CATEGORIZED_SUB_PROJECTS]]],
-                                    ]],
-                                ]],
-                            ],
-                        ],
-                        'then' => '$hours',
-                        'else' => 0,
-                    ],
-                ],
-            ],
-
-            'billable' => [
-                '$sum' => [
-                    '$cond' => [
-                        'if' => ['$not' => ['$in' => ['$project_code', $nonBillableCodes]]],
-                        'then' => '$hours',
-                        'else' => 0,
-                    ],
-                ],
-            ],
-
-            'total_hours' => ['$sum' => '$hours'],
-        ];
-
-        $pipeline[] = ['$group' => $groupStage];
-
-        // --- Project computed fields ---
-        $projectStage = [
-            '_id'        => 0,
-            'period_key' => '$_id',
-            'pto'        => 1,
-            'holiday'    => 1,
-            'other_200'  => 1,
-            'other_nb'   => 1,
-            'total_nb'   => ['$add' => ['$pto', '$holiday', '$other_200', '$other_nb']],
-            'billable'   => 1,
-            'total_hours' => 1,
-            'billable_percentage' => [
-                '$cond' => [
-                    'if'   => ['$gt' => ['$total_hours', 0]],
-                    'then' => [
-                        '$multiply' => [
-                            ['$divide' => ['$billable', '$total_hours']],
-                            100,
-                        ],
-                    ],
-                    'else' => 0,
-                ],
-            ],
-        ];
-
-        // Overtime: only for pay-period granularity
-        if ($granularity === 'pay-period') {
-            if ($wageType === 'hourly') {
-                $projectStage['overtime'] = [
-                    '$cond' => [
-                        'if'   => ['$gt' => ['$total_hours', 80]],
-                        'then' => ['$subtract' => ['$total_hours', 80]],
-                        'else' => 0,
-                    ],
-                ];
-            } else {
-                // Non-hourly employees never have overtime
-                $projectStage['overtime'] = ['$literal' => 0];
-            }
-        }
-
-        $pipeline[] = ['$project' => $projectStage];
-
-        // --- Sort chronologically ---
-        $pipeline[] = ['$sort' => ['period_key' => 1]];
 
         // --- Execute ---
         $collection = DB::connection('mongodb')->getCollection('hours');
@@ -858,13 +648,9 @@ class EmployeeTimeController extends Controller
      * Returns the pipeline stages needed to assign a period_key for
      * pay-period granularity. Injects the pay period definitions as an
      * inline array and uses $filter + $arrayElemAt to match each document.
-     *
-     * Returns two stages: $addFields (to tag the pay period) and $match
-     * (to drop unmatched documents).
      */
     private function getPayPeriodKeyStages(array $periods): array
     {
-        // Build the inline pay period array for the pipeline
         $ppArray = [];
         foreach ($periods as $p) {
             $ppArray[] = [
@@ -904,7 +690,7 @@ class EmployeeTimeController extends Controller
             // Extract the period_key and clean up the temporary field
             [
                 '$addFields' => [
-                    'period_key'  => '$_matched_pp.key',
+                    'period_key' => '$_matched_pp.key',
                 ],
             ],
             [
@@ -986,124 +772,17 @@ class EmployeeTimeController extends Controller
             }
 
             return ApiResponse::success([
-                'scopeColumns'   => $scopeColumns,
-                'periodColumns'  => $periodColumns,
-                'rows'           => $rows,
-                'headerMode'     => $headerMode,
+                'scopeColumns'  => $scopeColumns,
+                'periodColumns' => $periodColumns,
+                'rows'          => $rows,
+                'headerMode'    => $headerMode,
             ]);
 
         } catch (\Exception $e) {
-            Log::error('EmployeeTime Historian processing error: ' . $e->getMessage(), [
+            Log::error('EmployeeTimeHistorian processing error: ' . $e->getMessage(), [
                 'trace' => $e->getTraceAsString(),
             ]);
             return ApiResponse::error('Unable to process historian data.');
-        }
-    }
-
-    /**
-     * Process raw Aggregated pipeline results into the final ApiResponse.
-     * Fills in zero-rows for any periods with no data.
-     */
-    private function buildAggregatedComponent(
-        $aggregatedShared,
-        array $periods,
-        array $periodHeaders,
-        string $granularity,
-    ): object {
-        // If the shared data already carries an error, propagate it
-        if ($aggregatedShared instanceof \App\Http\Responses\ApiResponse) {
-            return $aggregatedShared;
-        }
-
-        try {
-            $showOvertime = $granularity === 'pay-period';
-
-            // Index raw results by period_key for fast lookup
-            $resultsByKey = [];
-            foreach ($aggregatedShared as $doc) {
-                $docArray = ($doc instanceof \MongoDB\Model\BSONDocument)
-                    ? (array) $doc
-                    : (array) $doc;
-
-                $key = $docArray['period_key'] ?? null;
-                if ($key !== null) {
-                    $resultsByKey[(string) $key] = $docArray;
-                }
-            }
-
-            // Build rows — one per period, filling missing with zeros
-            $rows = [];
-            $zeroRow = [
-                'pto'                  => 0,
-                'holiday'              => 0,
-                'other_200'            => 0,
-                'other_nb'             => 0,
-                'total_nb'             => 0,
-                'billable'             => 0,
-                'total_hours'          => 0,
-                'billable_percentage'  => 0,
-            ];
-            if ($showOvertime) {
-                $zeroRow['overtime'] = 0;
-            }
-
-            foreach ($periods as $p) {
-                $key = $p['key'];
-
-                if (isset($resultsByKey[$key])) {
-                    $doc = $resultsByKey[$key];
-                    $row = [
-                        'period_key'           => $key,
-                        'period_label'         => $periodHeaders[$key],
-                        'pto'                  => round((float) ($doc['pto'] ?? 0), 2),
-                        'holiday'              => round((float) ($doc['holiday'] ?? 0), 2),
-                        'other_200'            => round((float) ($doc['other_200'] ?? 0), 2),
-                        'other_nb'             => round((float) ($doc['other_nb'] ?? 0), 2),
-                        'total_nb'             => round((float) ($doc['total_nb'] ?? 0), 2),
-                        'billable'             => round((float) ($doc['billable'] ?? 0), 2),
-                        'total_hours'          => round((float) ($doc['total_hours'] ?? 0), 2),
-                        'billable_percentage'  => round((float) ($doc['billable_percentage'] ?? 0), 1),
-                    ];
-                    if ($showOvertime) {
-                        $row['overtime'] = round((float) ($doc['overtime'] ?? 0), 2);
-                    }
-                } else {
-                    $row = array_merge(
-                        ['period_key' => $key, 'period_label' => $periodHeaders[$key]],
-                        $zeroRow,
-                    );
-                }
-
-                $rows[] = $row;
-            }
-
-            // Build column definitions
-            $columns = [
-                ['key' => 'period_label', 'label' => 'Period'],
-                ['key' => 'pto',                 'label' => 'PTO'],
-                ['key' => 'holiday',             'label' => 'Holiday'],
-                ['key' => 'other_200',           'label' => 'Other T.O.'],
-                ['key' => 'other_nb',            'label' => 'Other N.B.'],
-                ['key' => 'total_nb',            'label' => 'Total N.B.'],
-                ['key' => 'billable',            'label' => 'Billable'],
-                ['key' => 'total_hours',         'label' => 'Total'],
-                ['key' => 'billable_percentage', 'label' => 'Billable %'],
-            ];
-            if ($showOvertime) {
-                $columns[] = ['key' => 'overtime', 'label' => 'Overtime'];
-            }
-
-            return ApiResponse::success([
-                'columns'      => $columns,
-                'rows'         => $rows,
-                'showOvertime' => $showOvertime,
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('EmployeeTime Aggregated processing error: ' . $e->getMessage(), [
-                'trace' => $e->getTraceAsString(),
-            ]);
-            return ApiResponse::error('Unable to process aggregated data.');
         }
     }
 }
